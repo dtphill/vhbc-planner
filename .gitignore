@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+dist/
+.dev.vars*
+.env*
+*.log
+*.sqlite*
+deployment-private.json
+
+scripts/preflight-worker.mjs

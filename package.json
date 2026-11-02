@@ -1,0 +1,27 @@
+{
+  "name": "vhbc-planner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-isolation=none tests/*.test.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "types": "wrangler types",
+    "db:local": "wrangler d1 migrations apply vhbc-planner --local",
+    "db:remote": "wrangler d1 migrations apply vhbc-planner --remote",
+    "schema": "node scripts/generate-auth-schema.mjs",
+    "pretest": "npm run build"
+  },
+  "dependencies": {
+    "better-auth": "1.7.15",
+    "fast-xml-parser": "5.11.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261102.1",
+    "esbuild": "0.28.2",
+    "wrangler": "4.156.1",
+    "miniflare": "5.20261101.0-beta"
+  }
+}

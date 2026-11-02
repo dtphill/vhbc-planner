@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vhbc-planner",
+  "main": "dist/worker.mjs",
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+    "redact_query_string": true
+  },
+  "build": {
+    "command": "npm run build"
+  },
+  "vars": {
+    "APP_URL": "https://vhbc.dtpgames.com"
+  },
+  "routes": [
+    {
+      "pattern": "vhbc.dtpgames.com",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vhbc-planner",
+      "database_id": "b82be4ae-dfb0-4b8d-85af-7518bb7fdcff",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 21 * * *"
+    ]
+  }
+}

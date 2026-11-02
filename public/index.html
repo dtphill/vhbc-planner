@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Victorian Historical Boardgaming Collective</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="vhbc-monthly-planner">
+    <header class="mq-header">
+      <div class="header-content">
+        <h1 class="mq-brand"><span>Victorian Historical</span><span>Boardgaming Collective</span></h1>
+        <div id="identity" class="identity"></div>
+      </div>
+    </header>
+    <nav id="navigation" class="mq-nav" aria-label="Main navigation" hidden></nav>
+    <div id="notice" class="notice" role="alert" hidden></div>
+    <main class="mq-main" id="main" aria-busy="true" tabindex="-1"><p>Loading the meeting details…</p></main>
+    <footer class="mq-footer">
+      <span id="status" class="mq-message" role="status" aria-live="polite"></span>
+      <button type="button" id="undo-button" class="mq-small-action" hidden>Undo last preference change</button>
+    </footer>
+  </div>
+  <dialog id="information-dialog" aria-labelledby="dialog-title">
+    <h2 id="dialog-title"></h2>
+    <p id="dialog-text"></p>
+    <form method="dialog"><button type="submit">Close</button></form>
+  </dialog>
+  <noscript><p class="no-script">JavaScript is needed to sign in and record preferences.</p></noscript>
+</body>
+</html>
