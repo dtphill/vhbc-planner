@@ -168,7 +168,7 @@ export async function searchBgg(query, env = {}) {
     const response = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/xml, text/xml" },
       signal: controller.signal,
-      redirect: "error",
+      redirect: "manual",
     });
     if (response.status === 401 || response.status === 403) {
       if (response.body) await response.body.cancel().catch(() => {});

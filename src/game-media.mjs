@@ -1,5 +1,5 @@
 /** Optional BGG artwork layer. Accounts, preferences and allocation stay in the base Worker. */
-export const MEDIA_VERSION = '1.2.0';
+export const MEDIA_VERSION = '1.2.1';
 // Unmodified Powered by BGG lockup. Source/provenance is recorded in docs/game-media.md.
 export const BADGE_URL = 'https://dm1i7q1ruvbhg.cloudfront.net/assets/powered_by_bgg-9f2993c7fad826d5407c35b5c8117b08d2a6cdf5beb1f0c02d06a7dc7f5cdd7f.png';
 const DAY = 86400000;
@@ -86,7 +86,7 @@ export async function thumbnailResponse(request, env, ctx, base) {
   try {
     const target=new URL('https://boardgamegeek.com/xmlapi2/thing');
     target.searchParams.set('id',pending.join(',')); target.searchParams.set('type','boardgame');
-    const response=await fetch(target,{headers:{Authorization:'Bearer '+env.BGG_TOKEN.trim(),Accept:'application/xml, text/xml'},redirect:'error',signal:controller.signal});
+    const response=await fetch(target,{headers:{Authorization:'Bearer '+env.BGG_TOKEN.trim(),Accept:'application/xml, text/xml'},redirect:'manual',signal:controller.signal});
     if (!response.ok || response.status===202) {
       await response.body?.cancel();
       return reply({thumbnails,pending,retryAfter:response.status===429?60:15});
@@ -109,7 +109,7 @@ async function badgeResponse(request, ctx) {
   const key=new Request(new URL('/media/powered-by-bgg.png',request.url));
   let cached=await cache?.match(key);
   if(cached) return request.method==='HEAD'?new Response(null,cached):cached;
-  const response=await fetch(BADGE_URL,{redirect:'error',signal:AbortSignal.timeout(10000)});
+  const response=await fetch(BADGE_URL,{redirect:'manual',signal:AbortSignal.timeout(10000)});
   if(!response.ok || !response.headers.get('content-type')?.toLowerCase().startsWith('image/png')) {await response.body?.cancel();return new Response('Badge temporarily unavailable',{status:503,headers:HEADERS});}
   const bytes=await boundedBytes(response,524288);
   if (![137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n)) throw new Error('Invalid badge image');

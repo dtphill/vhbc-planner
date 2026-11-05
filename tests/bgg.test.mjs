@@ -76,7 +76,7 @@ test("search uses the fixed HTTPS XML API, authorised header and parsed result s
   assert.equal(received.url.searchParams.get("query"), "Maria & Nevsky");
   assert.equal(received.url.searchParams.get("type"), "boardgame");
   assert.equal(received.options.headers.Authorization, "Bearer test-token-only");
-  assert.equal(received.options.redirect, "error");
+  assert.equal(received.options.redirect, "manual");
   assert.ok(received.options.signal instanceof AbortSignal);
   assert.deepEqual(result, {
     results: [
@@ -227,4 +227,18 @@ test("result list is capped at 25 unique games", async (t) => {
   const items = Array.from({ length: 30 }, (_, i) => `<item type="boardgame" id="${i + 1}"><name type="primary" value="Game ${i + 1}"/></item>`).join("");
   t.mock.method(globalThis, "fetch", async () => new Response(`<items total="30">${items}</items>`));
   assert.equal((await searchBgg("Game", ENV)).results.length, 25);
+});
+
+test("search redirects are rejected without forwarding the token", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    calls++;
+    assert.equal(options.redirect, "manual");
+    return new Response("", {status: 302, headers: {Location: "https://elsewhere.invalid/"}});
+  });
+  const result = await searchBgg("Root", ENV);
+  assert.equal(result.externalAvailable, false);
+  assert.deepEqual(result.results, []);
+  assert.equal(calls, 1);
+  assert.doesNotMatch(JSON.stringify(result), /test-token-only/);
 });
