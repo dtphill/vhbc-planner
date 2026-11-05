@@ -2,6 +2,7 @@ import html from '../public/index.html';
 import javascript from '../public/app.js';
 import css from '../public/style.css';
 import {handleApi, HttpError, scheduledTasks} from './api.mjs';
+import {MeetingError} from './meetings.mjs';
 
 const favicon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#34203e"/><path d="M9 13h46M9 51h46" stroke="#bb9146" stroke-width="2"/><text x="32" y="43" text-anchor="middle" font-family="Georgia,serif" font-size="32" fill="#f5f0e7">V</text></svg>';
 const securityHeaders = {
@@ -27,7 +28,7 @@ export default {
         response = file ? new Response(request.method==='HEAD' ? null : file[0],{headers:{'Content-Type':file[1],'Cache-Control':path==='/'?'no-cache':'public, max-age=300'}}) : new Response('Not found',{status:404});
       }
     } catch (error) {
-      const status = error instanceof HttpError ? error.status : 500;
+      const status = (error instanceof HttpError || error instanceof MeetingError) ? error.status : 500;
       if (status === 500) console.error(JSON.stringify({event:'request.failed',name:error?.name || 'Error'}));
       response = Response.json({error:status===500?'Something went wrong. Please refresh and try again.':error.message},{status,headers:{'Cache-Control':'no-store'}});
     }

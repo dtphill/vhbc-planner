@@ -13,7 +13,7 @@ fragment.delete('invite');
 fragment.delete('reset');
 
 const state = {
-  data: null, view: 'meeting', busy: false, filter: 'all', query: '',
+  data: null, meetingSchedule: null, view: 'meeting', busy: false, filter: 'all', query: '',
   review: { active: false, ids: [], index: 0 }, undo: null,
   searchQuery: '', searchResults: [], searchMessage: '', searching: false, searchVersion: 0,
   selectedGame: null, editingGameId: null, gameDraft: emptyGameDraft(),
@@ -58,6 +58,7 @@ function information(title, text) {
 
 async function api(path, options = {}) {
   const request = { credentials: 'same-origin', cache: 'no-store', ...options, headers: { Accept: 'application/json', ...(options.headers || {}) } };
+  if (state.data?.meeting?.date && options.method && !options.body?.meetingDate && /^\/api\/(?:attendance|admin\/(?:plan|fixed|lock|complete))$/.test(path)) request.headers['X-VHBC-Meeting'] = state.data.meeting.date;
   if (options.body !== undefined && typeof options.body !== 'string') { request.headers['Content-Type'] = 'application/json'; request.body = JSON.stringify(options.body); }
   let response;
   try { response = await fetch(path, request); } catch { throw new Error('The connection failed. Your change has not been confirmed. Please try again.'); }
@@ -70,7 +71,11 @@ async function api(path, options = {}) {
   }
   return result;
 }
-async function load() { state.data = await api('/api/bootstrap'); return state.data; }
+async function load() {
+  state.data = await api('/api/bootstrap');
+  state.meetingSchedule = isAdmin() ? await api('/api/admin/meetings') : null;
+  return state.data;
+}
 async function perform(work, success, after, progress = 'Saving…') {
   if (state.busy) return false;
   state.busy = true;
@@ -120,7 +125,7 @@ function render() {
   main.innerHTML = (renderers[state.view] || meetingHTML)();
 }
 function signInHTML() {
-  return '<div class="auth-layout"><section><h2>Sign in</h2><form id="sign-in-form" class="form-stack"><label>Email address<input type="email" name="email" autocomplete="username" required maxlength="254"></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button class="mq-primary" type="submit">Sign in</button></form><button class="mq-small-action" type="button" data-action="forgot-password">Forgot password?</button><p class="mq-muted">New members join using an invitation from the organiser.</p></section><section class="meeting-note"><h2>Next meeting</h2><p class="mq-meeting-date">' + esc(meetingLabel()) + '</p><p>Fourth Sunday of the month, from 10 am.</p></section></div>';
+  return '<div class="auth-layout"><section><h2>Sign in</h2><form id="sign-in-form" class="form-stack"><label>Email address<input type="email" name="email" autocomplete="username" required maxlength="254"></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button class="mq-primary" type="submit">Sign in</button></form><button class="mq-small-action" type="button" data-action="forgot-password">Forgot password?</button><p class="mq-muted">New members join using an invitation from the organiser.</p></section><section class="meeting-note"><h2>Next meeting</h2><p class="mq-meeting-date">' + esc(meetingLabel()) + '</p><p>Normally the fourth Sunday of the month, from 10 am.</p></section></div>';
 }
 function registrationHTML() {
   if (state.data?.user) return '<section class="auth-panel"><h2>Join the group</h2><p>You are signed in as ' + esc(state.data.user.name) + '. Sign out to register with this invitation.</p><button type="button" data-action="sign-out" class="mq-primary">Sign out</button></section>';
@@ -264,11 +269,21 @@ function priorMeetingHTML() {
   }
   return html + '</details></section>';
 }
+function meetingManagementHTML() {
+  const schedule = state.meetingSchedule;
+  if (!schedule) return '';
+  const entries = schedule.meetings || [];
+  const rowHTML = m => '<li><div><strong>' + esc(dateLabel(m.date)) + '</strong><p class="mq-muted">' + (m.removedAt != null ? 'Removed' : m.status === 'completed' ? 'Recorded' : m.date === schedule.currentDate ? 'Next meeting · 10 am' : '10 am') + '</p></div>' + (m.status === 'completed' ? '' : '<button type="button" class="mq-small-action" data-' + (m.removedAt != null ? 'restore' : 'remove') + '-meeting="' + esc(m.date) + '">' + (m.removedAt != null ? 'Restore meeting' : 'Remove meeting') + '</button>') + '</li>';
+  const upcoming = entries.filter(m => m.removedAt == null);
+  const removed = entries.filter(m => m.removedAt != null);
+  const earlier = schedule.earlierMeetings || [];
+  return '<section class="mq-section spaced-section"><h2>Meetings</h2><p class="mq-muted">Fourth Sundays are listed automatically. Add another date or remove a meeting when needed. All meetings start at 10 am.</p><form id="create-meeting-form" class="form-stack compact-form"><label>Meeting date<input name="date" type="date" required min="' + esc(schedule.today) + '"></label><button type="submit" class="mq-primary">Add meeting</button></form><details class="organiser-details" open><summary>Upcoming meetings</summary><ul class="fixed-list">' + upcoming.map(rowHTML).join('') + '</ul></details>' + (removed.length ? '<details class="organiser-details"><summary>Removed meetings</summary><ul class="fixed-list">' + removed.map(rowHTML).join('') + '</ul></details>' : '') + (earlier.length ? '<details class="organiser-details"><summary>Earlier unrecorded meetings</summary><ul class="fixed-list">' + earlier.map(rowHTML).join('') + '</ul></details>' : '') + '</section>';
+}
 function organiseHTML() {
   const plan = state.data.plan;
   const fixed = currentFixedTables();
   const complete = state.data.meeting?.status === 'completed';
-  return '<div class="heading-row"><h2>Organise the meeting</h2><span class="mq-muted">' + esc(meetingLabel()) + '</span></div><div class="mq-inline admin-actions"><button type="button" class="mq-primary" data-action="recommend"' + (complete ? ' disabled' : '') + '>Recommend tables</button>' + (plan?.tables?.length && !plan.locked ? '<button type="button" data-action="lock-plan"' + ((plan.unassignedMemberIds || []).length ? ' disabled' : '') + '>Confirm these tables</button>' : '') + '</div>' + planHTML(true) + '<section class="mq-section spaced-section"><h2>Pre-arranged tables</h2>' + (fixed.length ? '<ul class="fixed-list">' + fixed.map((table, index) => '<li><div><strong>' + esc(gameName(table.gameId)) + '</strong><p class="mq-muted">' + table.memberIds.map(id => esc(memberName(id))).join(', ') + '</p></div><button type="button" class="mq-small-action" data-remove-fixed="' + index + '">Remove reservation</button></li>').join('') + '</ul>' : '<p class="mq-muted">No pre-arranged tables.</p>') + (!complete ? '<details class="organiser-details"><summary>Reserve an agreed table</summary><div id="fixed-form-container">' + fixedFormHTML() + '</div></details>' : '') + '</section>' + (plan?.locked && !complete ? '<section class="mq-section spaced-section"><h2>Record the meeting</h2><p>Check the tables above against what was actually played. If they differ, update the arrangements before recording the meeting.</p><label class="mq-checkbox"><input id="confirm-played" type="checkbox"' + (state.completionConfirmed ? ' checked' : '') + '>These tables match what was actually played.</label><button type="button" class="mq-primary" data-action="complete-meeting"' + (!state.completionConfirmed ? ' disabled' : '') + '>Record completed meeting</button></section>' : '') + priorMeetingHTML() + '<section class="mq-section spaced-section"><h2>Invite a member</h2><form id="invite-form" class="form-stack compact-form"><label>Email address<input name="email" type="email" required autocomplete="off" maxlength="254"></label><label>Name <span class="mq-muted">Optional</span><input name="name" maxlength="60" autocomplete="off"></label><button type="submit">Create invitation link</button></form></section><section class="mq-section spaced-section"><h2>Password recovery</h2><form id="admin-reset-form" class="form-stack compact-form"><label>Member<select name="userId" required><option value="">Choose a member</option>' + members().map(m => '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>').join('') + '</select></label><button type="submit">Create private reset link</button></form></section>' + privateLinkHTML();
+  return meetingManagementHTML() + '<div class="heading-row"><h2>Organise the meeting</h2><span class="mq-muted">' + esc(meetingLabel()) + '</span></div><div class="mq-inline admin-actions"><button type="button" class="mq-primary" data-action="recommend"' + (complete ? ' disabled' : '') + '>Recommend tables</button>' + (plan?.tables?.length && !plan.locked ? '<button type="button" data-action="lock-plan"' + ((plan.unassignedMemberIds || []).length ? ' disabled' : '') + '>Confirm these tables</button>' : '') + '</div>' + planHTML(true) + '<section class="mq-section spaced-section"><h2>Pre-arranged tables</h2>' + (fixed.length ? '<ul class="fixed-list">' + fixed.map((table, index) => '<li><div><strong>' + esc(gameName(table.gameId)) + '</strong><p class="mq-muted">' + table.memberIds.map(id => esc(memberName(id))).join(', ') + '</p></div><button type="button" class="mq-small-action" data-remove-fixed="' + index + '">Remove reservation</button></li>').join('') + '</ul>' : '<p class="mq-muted">No pre-arranged tables.</p>') + (!complete ? '<details class="organiser-details"><summary>Reserve an agreed table</summary><div id="fixed-form-container">' + fixedFormHTML() + '</div></details>' : '') + '</section>' + (plan?.locked && !complete ? '<section class="mq-section spaced-section"><h2>Record the meeting</h2><p>Check the tables above against what was actually played. If they differ, update the arrangements before recording the meeting.</p><label class="mq-checkbox"><input id="confirm-played" type="checkbox"' + (state.completionConfirmed ? ' checked' : '') + '>These tables match what was actually played.</label><button type="button" class="mq-primary" data-action="complete-meeting"' + (!state.completionConfirmed ? ' disabled' : '') + '>Record completed meeting</button></section>' : '') + priorMeetingHTML() + '<section class="mq-section spaced-section"><h2>Invite a member</h2><form id="invite-form" class="form-stack compact-form"><label>Email address<input name="email" type="email" required autocomplete="off" maxlength="254"></label><label>Name <span class="mq-muted">Optional</span><input name="name" maxlength="60" autocomplete="off"></label><button type="submit">Create invitation link</button></form></section><section class="mq-section spaced-section"><h2>Password recovery</h2><form id="admin-reset-form" class="form-stack compact-form"><label>Member<select name="userId" required><option value="">Choose a member</option>' + members().map(m => '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>').join('') + '</select></label><button type="submit">Create private reset link</button></form></section>' + privateLinkHTML();
 }
 function historyHTML() {
   const items = state.data.history || [];
@@ -346,6 +361,19 @@ root.addEventListener('click', async event => {
   if (d.view) { navigate(d.view); return; }
   if (d.rate) { await saveRating(d.game, d.rate, d.review === 'true'); return; }
   if (d.priority) { await savePriority(same(prefs().priorityGameId, d.priority) ? null : d.priority, d.review === 'true'); return; }
+  if (d.removeMeeting || d.restoreMeeting) {
+    const date = d.removeMeeting || d.restoreMeeting;
+    const schedule = state.meetingSchedule;
+    const meeting = [...(schedule?.meetings || []), ...(schedule?.earlierMeetings || [])].find(m => m.date === date);
+    if (!meeting || !isAdmin()) return;
+    const removing = Boolean(d.removeMeeting);
+    const message = removing
+      ? 'Remove ' + dateLabel(date) + '? This hides the meeting and stops its reminders. Preferences and completed play history are unchanged. Future meetings can be restored later.'
+      : 'Restore ' + dateLabel(date) + '? Previous attendance is kept, but tables will need to be planned again.';
+    if (!window.confirm(message)) return;
+    await perform(() => post('/api/admin/meetings/' + (removing ? 'remove' : 'restore'), {date, revision:meeting.revision}), removing ? 'Meeting removed.' : 'Meeting restored.', () => { state.priorMeeting = null; state.priorConfirmed = false; state.completionConfirmed = false; });
+    return;
+  }
   if (d.filter) { state.filter = d.filter; render(); return; }
   if (d.offer) { editOffer(gameById(d.offer)); render(); return; }
   if (d.count) {
@@ -448,6 +476,8 @@ root.addEventListener('submit', async event => {
       await perform(() => post('/api/admin/reset', { userId }), 'Private reset link created.', response => { state.privateLink = { title: 'Password-reset link', recipient: memberName(userId), url: response.url }; });
       document.getElementById('private-link')?.scrollIntoView({ block: 'nearest' }); break;
     }
+    case 'create-meeting-form':
+      await perform(() => post('/api/admin/meetings', {date:String(fd.get('date') || '')}), 'Meeting added.', () => { state.completionConfirmed = false; }); break;
     case 'prior-meeting-form':
       await perform(() => api('/api/admin/meeting?date=' + encodeURIComponent(fd.get('date'))), 'Earlier meeting loaded.', response => { state.priorMeeting = response; state.priorConfirmed = false; }, 'Loading meeting…'); break;
   }

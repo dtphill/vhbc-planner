@@ -1,5 +1,6 @@
 import {createAuth, mailEnabled, randomToken, tokenHash, sendMail} from './auth.mjs';
-import {nextMeeting, localDate} from './calendar.mjs';
+import {localDate} from './calendar.mjs';
+import {ensureMeeting, describeMeeting, manageMeetings} from './meetings.mjs';
 import {allocateTables} from './allocation.mjs';
 import {parseBggId, searchBgg} from './bgg.mjs';
 
@@ -56,12 +57,8 @@ async function rateLimit(env, request, bucket, max = 15) {
   if (row.count > max) fail(429, 'Please wait a minute before trying again.');
 }
 
-async function ensureMeeting(env) {
-  const current = nextMeeting();
-  await statement(env.DB, 'INSERT OR IGNORE INTO meetings(id,updated_at) VALUES (?,?)', current.date, Date.now()).run();
-  return {...current, ...await first(env.DB, 'SELECT * FROM meetings WHERE id=?', current.date)};
-}
 const invalidate = (db, date) => statement(db, "UPDATE meetings SET plan_json=NULL,status='open',revision=revision+1,updated_at=? WHERE id=? AND status!='completed'", Date.now(), date);
+const invalidateUpcoming = db => statement(db, "UPDATE meetings SET plan_json=NULL,status='open',revision=revision+1,updated_at=? WHERE id>=? AND status!='completed' AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=meetings.id)", Date.now(), localDate());
 const audit = (db, actor, action, meeting = null) => statement(db, 'INSERT INTO audit_log(id,actor_id,action,meeting_id,created_at) VALUES (?,?,?,?,?)', crypto.randomUUID(), actor, action, meeting, Date.now());
 
 async function getMember(env, auth, request, required = true) {
@@ -80,19 +77,19 @@ async function gameList(env) {
 
 async function bootstrap(env, auth, request) {
   const member = await getMember(env, auth, request, false);
-  const base = {user:null,meeting:{...nextMeeting(),status:'open'},config:{bggSearch:!!env.BGG_TOKEN,emailNotifications:mailEnabled(env)}};
-  if (!member) return json(base);
   const meeting = await ensureMeeting(env);
+  const base = {user:null,meeting:{...describeMeeting(meeting.id),status:meeting.status},config:{bggSearch:!!env.BGG_TOKEN,emailNotifications:mailEnabled(env)}};
+  if (!member) return json(base);
   const [games, ratings, members, history, pending] = await Promise.all([
     gameList(env),
     all(env.DB, 'SELECT game_id,value FROM ratings WHERE user_id=?', member.id),
     all(env.DB, 'SELECT m.user_id AS id,u.name,COALESCE(a.coming,0) AS coming FROM members m JOIN user u ON u.id=m.user_id LEFT JOIN attendance a ON a.user_id=m.user_id AND a.meeting_id=? WHERE m.disabled=0 ORDER BY u.name', meeting.date),
     all(env.DB, 'SELECT h.meeting_id AS date,h.game_id AS gameId,g.title,h.rating,h.fixed,h.priority_game_id AS priorityGameId FROM history h JOIN games g ON g.id=h.game_id WHERE h.user_id=? ORDER BY h.meeting_id DESC LIMIT 24', member.id),
-    member.role === 'admin' ? all(env.DB, "SELECT id AS date,status,revision FROM meetings WHERE id<? AND status!='completed' AND plan_json IS NOT NULL ORDER BY id DESC LIMIT 12", meeting.date) : Promise.resolve([]),
+    member.role === 'admin' ? all(env.DB, "SELECT id AS date,status,revision FROM meetings WHERE id<? AND status!='completed' AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=meetings.id) AND plan_json IS NOT NULL ORDER BY id DESC LIMIT 12", meeting.date) : Promise.resolve([]),
   ]);
   const plan = meeting.plan_json ? JSON.parse(meeting.plan_json) : null;
   if (plan) delete plan.snapshot;
-  return json({...base,user:{id:member.id,name:member.name,email:member.email,emailVerified:member.emailVerified,role:member.role,notifications:!!member.notifications},meeting:{...nextMeeting(),status:meeting.status},games,preferences:{ratings:Object.fromEntries(ratings.map(r=>[r.game_id,r.value])),priorityGameId:member.priority_game_id},attendance:{coming:!!members.find(m=>m.id===member.id)?.coming},members:members.map(m=>({...m,coming:!!m.coming})),fixedTables:JSON.parse(meeting.fixed_json),plan:plan ? {...plan,locked:meeting.status==='locked',completed:meeting.status==='completed',revision:meeting.revision} : null,history,pendingMeetings:pending});
+  return json({...base,user:{id:member.id,name:member.name,email:member.email,emailVerified:member.emailVerified,role:member.role,notifications:!!member.notifications},meeting:{...describeMeeting(meeting.id),status:meeting.status},games,preferences:{ratings:Object.fromEntries(ratings.map(r=>[r.game_id,r.value])),priorityGameId:member.priority_game_id},attendance:{coming:!!members.find(m=>m.id===member.id)?.coming},members:members.map(m=>({...m,coming:!!m.coming})),fixedTables:JSON.parse(meeting.fixed_json),plan:plan ? {...plan,locked:meeting.status==='locked',completed:meeting.status==='completed',revision:meeting.revision} : null,history,pendingMeetings:pending});
 }
 
 async function register(request, env, ctx) {
@@ -168,7 +165,7 @@ async function notifyPlan(env, meeting, plan) {
 
 export async function flushNotifications(env) {
   if (!mailEnabled(env)) return;
-  const pending = await all(env.DB,"SELECT n.*,u.email FROM notification_outbox n JOIN user u ON u.id=n.user_id JOIN members m ON m.user_id=n.user_id WHERE n.sent_at IS NULL AND u.emailVerified=1 AND m.notifications=1 AND m.disabled=0 AND (n.kind!='confirmed' OR EXISTS(SELECT 1 FROM meetings x WHERE x.id=n.meeting_id AND x.revision=n.revision AND x.status='locked')) ORDER BY n.created_at LIMIT 30");
+  const pending = await all(env.DB,"SELECT n.*,u.email FROM notification_outbox n JOIN user u ON u.id=n.user_id JOIN members m ON m.user_id=n.user_id WHERE n.sent_at IS NULL AND u.emailVerified=1 AND m.notifications=1 AND m.disabled=0 AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=COALESCE(n.meeting_id,substr(n.id,1,10))) AND (n.kind!='confirmed' OR EXISTS(SELECT 1 FROM meetings x WHERE x.id=n.meeting_id AND x.revision=n.revision AND x.status='locked')) ORDER BY n.created_at LIMIT 30");
   for (const mail of pending) {
     // Providers may occasionally retry delivery; no credentials or message content are logged.
     try {
@@ -182,11 +179,11 @@ export async function scheduledTasks(env) {
   await statement(env.DB,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run();
   await statement(env.DB,'DELETE FROM bgg_cache WHERE expires_at<?',Date.now()).run();
   if (!mailEnabled(env)) return;
-  const meeting = nextMeeting();
+  const meeting = await ensureMeeting(env);
   const days = (Date.parse(meeting.date)-Date.parse(localDate()))/86400000;
   if (days === 7) {
     const users = await all(env.DB,'SELECT m.user_id,u.name FROM members m JOIN user u ON u.id=m.user_id WHERE m.disabled=0 AND m.notifications=1 AND u.emailVerified=1');
-    if (users.length) await env.DB.batch(users.map(u=>statement(env.DB,'INSERT OR IGNORE INTO notification_outbox(id,user_id,subject,body,created_at) VALUES (?,?,?,?,?)',`${meeting.date}:reminder:${u.user_id}`,u.user_id,'Next Collective meeting',`${u.name}, our next meeting is ${meeting.label} at 10 am.\n\nLet the group know if you are coming: ${env.APP_URL}\n\nYour standing game choices are already saved.`,Date.now())));
+    if (users.length) await env.DB.batch(users.map(u=>statement(env.DB,'INSERT OR IGNORE INTO notification_outbox(id,user_id,meeting_id,subject,body,created_at) VALUES (?,?,?,?,?,?)',`${meeting.date}:reminder:${u.user_id}`,u.user_id,meeting.date,'Next Collective meeting',`${u.name}, our next meeting is ${meeting.label} at 10 am.\n\nLet the group know if you are coming: ${env.APP_URL}\n\nYour standing game choices are already saved.`,Date.now())));
   }
   await flushNotifications(env);
 }
@@ -199,7 +196,7 @@ export async function handleApi(request, env, ctx) {
     if (request.headers.get('origin') !== env.APP_URL) fail(403,'This request must come from the Collective website.');
     if (request.headers.get('sec-fetch-site') === 'cross-site') fail(403,'Cross-site requests are not accepted.');
   }
-  if (path === '/api/health' && request.method === 'GET') return json({ok:true,version:'1.0.0'});
+  if (path === '/api/health' && request.method === 'GET') return json({ok:true,version:'1.1.0'});
   if (path === '/api/register' && request.method === 'POST') return register(request,env,ctx);
   const auth = createAuth(env,ctx);
   if (path.startsWith('/api/auth/')) {
@@ -215,7 +212,7 @@ export async function handleApi(request, env, ctx) {
   }
   if (path === '/api/bootstrap' && request.method === 'GET') return bootstrap(env,auth,request);
   const member = await getMember(env,auth,request);
-  const meeting = await ensureMeeting(env);
+  const meeting = await ensureMeeting(env, request.headers.get('x-vhbc-meeting'));
   const body = request.method === 'GET' ? {} : await readJson(request);
 
   if (path === '/api/attendance' && request.method === 'POST') {
@@ -227,13 +224,13 @@ export async function handleApi(request, env, ctx) {
   if (path === '/api/rating' && request.method === 'POST') {
     if (!['want','will','pass',null].includes(body.rating)) fail(400,'Choose Want, Will play or Pass.');
     if (!await first(env.DB,'SELECT id FROM games WHERE id=?',body.gameId ?? '')) fail(404,'This game is not available.');
-    const changes = [body.rating === null ? statement(env.DB,'DELETE FROM ratings WHERE user_id=? AND game_id=?',member.id,body.gameId) : statement(env.DB,'INSERT INTO ratings(user_id,game_id,value,updated_at) VALUES (?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',member.id,body.gameId,body.rating,Date.now()),invalidate(env.DB,meeting.id)];
+    const changes = [body.rating === null ? statement(env.DB,'DELETE FROM ratings WHERE user_id=? AND game_id=?',member.id,body.gameId) : statement(env.DB,'INSERT INTO ratings(user_id,game_id,value,updated_at) VALUES (?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',member.id,body.gameId,body.rating,Date.now()),invalidateUpcoming(env.DB)];
     if (body.rating !== 'want') changes.push(statement(env.DB,'UPDATE members SET priority_game_id=NULL WHERE user_id=? AND priority_game_id=?',member.id,body.gameId));
     await env.DB.batch(changes); return json({ok:true});
   }
   if (path === '/api/priority' && request.method === 'POST') {
     if (body.gameId !== null && !await first(env.DB,'SELECT id FROM games WHERE id=?',body.gameId ?? '')) fail(404,'This game is not available.');
-    const changes = [statement(env.DB,'UPDATE members SET priority_game_id=? WHERE user_id=?',body.gameId,member.id),invalidate(env.DB,meeting.id)];
+    const changes = [statement(env.DB,'UPDATE members SET priority_game_id=? WHERE user_id=?',body.gameId,member.id),invalidateUpcoming(env.DB)];
     if (body.gameId) changes.push(statement(env.DB,"INSERT INTO ratings(user_id,game_id,value,updated_at) VALUES (?,?,'want',?) ON CONFLICT(user_id,game_id) DO UPDATE SET value='want',updated_at=excluded.updated_at",member.id,body.gameId,Date.now()));
     await env.DB.batch(changes); return json({ok:true});
   }
@@ -256,7 +253,7 @@ export async function handleApi(request, env, ctx) {
     const id = existing?.id || crypto.randomUUID();
     await env.DB.batch([
       existing ? statement(env.DB,'UPDATE games SET bgg_id=COALESCE(bgg_id,?) WHERE id=?',bggId,id) : statement(env.DB,'INSERT INTO games(id,title,normalized_title,bgg_id,created_by,created_at) VALUES (?,?,?,?,?,?)',id,title,normalized,bggId,member.id,Date.now()),
-      statement(env.DB,'INSERT INTO offers(user_id,game_id,own,teach,counts_json,pitch) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET own=excluded.own,teach=excluded.teach,counts_json=excluded.counts_json,pitch=excluded.pitch',member.id,id,+offer.own,+offer.teach,JSON.stringify(offer.counts),offer.pitch),invalidate(env.DB,meeting.id),
+      statement(env.DB,'INSERT INTO offers(user_id,game_id,own,teach,counts_json,pitch) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET own=excluded.own,teach=excluded.teach,counts_json=excluded.counts_json,pitch=excluded.pitch',member.id,id,+offer.own,+offer.teach,JSON.stringify(offer.counts),offer.pitch),invalidateUpcoming(env.DB),
     ]);
     return json({ok:true,gameId:id,existing:!!existing});
   }
@@ -264,7 +261,7 @@ export async function handleApi(request, env, ctx) {
   if (offerMatch && request.method === 'PUT') {
     const id = offerMatch[1]; const offer = validateOffer(body);
     if (!await first(env.DB,'SELECT id FROM games WHERE id=?',id)) fail(404,'This game is not available.');
-    await env.DB.batch([statement(env.DB,'INSERT INTO offers(user_id,game_id,own,teach,counts_json,pitch) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET own=excluded.own,teach=excluded.teach,counts_json=excluded.counts_json,pitch=excluded.pitch',member.id,id,+offer.own,+offer.teach,JSON.stringify(offer.counts),offer.pitch),invalidate(env.DB,meeting.id)]);
+    await env.DB.batch([statement(env.DB,'INSERT INTO offers(user_id,game_id,own,teach,counts_json,pitch) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET own=excluded.own,teach=excluded.teach,counts_json=excluded.counts_json,pitch=excluded.pitch',member.id,id,+offer.own,+offer.teach,JSON.stringify(offer.counts),offer.pitch),invalidateUpcoming(env.DB)]);
     return json({ok:true});
   }
   if (path === '/api/search' && request.method === 'GET') {
@@ -279,6 +276,8 @@ export async function handleApi(request, env, ctx) {
   }
   if (!path.startsWith('/api/admin/')) fail(404,'This action could not be found.');
   if (member.role !== 'admin') fail(403,'Only the organiser can use this action.');
+  const meetingAction = await manageMeetings(request, env, member, body);
+  if (meetingAction) return meetingAction;
 
   if (path === '/api/admin/invites' && request.method === 'POST') {
     const email = emailAddress(body.email);
@@ -311,7 +310,7 @@ export async function handleApi(request, env, ctx) {
     return savePlan(env,member,meeting,input,body.tables);
   }
   if (path === '/api/admin/lock' && request.method === 'POST') {
-    const target = body.meetingDate ? await first(env.DB,'SELECT * FROM meetings WHERE id=?',cleanText(body.meetingDate,10,'Meeting date')) : meeting;
+    const target = body.meetingDate ? await first(env.DB,'SELECT * FROM meetings WHERE id=? AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=meetings.id)',cleanText(body.meetingDate,10,'Meeting date')) : meeting;
     if (!target || !target.plan_json || target.revision !== body.revision || target.status !== 'open') fail(409,'The plan has changed. Refresh it before confirming.');
     const plan = JSON.parse(target.plan_json);
     if (plan.unassignedMemberIds.length) fail(422,'Some attendees do not yet have a game. Resolve the unmatched players before confirming.');
@@ -324,14 +323,14 @@ export async function handleApi(request, env, ctx) {
   if (path === '/api/admin/meeting' && request.method === 'GET') {
     const date = url.searchParams.get('date');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) fail(400,'Choose a meeting date.');
-    const row = await first(env.DB,'SELECT * FROM meetings WHERE id=?',date);
+    const row = await first(env.DB,'SELECT * FROM meetings WHERE id=? AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=meetings.id)',date);
     if (!row) fail(404,'Meeting not found.');
     const plan = row.plan_json ? JSON.parse(row.plan_json) : null;
     if (plan) { delete plan.snapshot; plan.revision=row.revision; plan.locked=row.status==='locked'; }
     return json({meeting:{date,status:row.status},plan});
   }
   if (path === '/api/admin/complete' && request.method === 'POST') {
-    const target = body.meetingDate ? await first(env.DB,'SELECT * FROM meetings WHERE id=?',cleanText(body.meetingDate,10,'Meeting date')) : meeting;
+    const target = body.meetingDate ? await first(env.DB,'SELECT * FROM meetings WHERE id=? AND NOT EXISTS(SELECT 1 FROM meeting_exclusions x WHERE x.meeting_id=meetings.id)',cleanText(body.meetingDate,10,'Meeting date')) : meeting;
     if (!target || !target.plan_json || target.revision !== body.revision || target.status !== 'locked') fail(409,'Confirm the current tables before recording what was played.');
     if (target.id > localDate()) fail(422,'Record actual play on the meeting date or afterwards.');
     const plan = JSON.parse(target.plan_json);

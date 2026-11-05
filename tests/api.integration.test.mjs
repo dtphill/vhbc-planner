@@ -9,7 +9,7 @@ test('Real Worker and D1: private accounts, saved preferences, allocation consen
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,scriptPath:'dist/worker.mjs',compatibilityDate:'2026-11-02',compatibilityFlags:['nodejs_compat'],cf:false,d1Databases:['DB'],bindings:{APP_URL:origin,BETTER_AUTH_SECRET:randomBytes(32).toString('hex')},log:new Log(LogLevel.ERROR)}));
   try {
     const db=await mf.getD1Database('DB');
-    for(const file of ['0001_auth.sql','0002_app.sql']){
+    for(const file of ['0001_auth.sql','0002_app.sql','0003_meeting_management.sql']){
       const sql=await readFile(new URL('../migrations/'+file,import.meta.url),'utf8');
       await db.batch(sql.replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean).map(s=>db.prepare(s)));
     }
