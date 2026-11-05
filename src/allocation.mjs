@@ -1,7 +1,9 @@
+import {createMeetingTieBreak} from './tie-break.mjs';
+
 /**
  * Pure, deterministic allocation of complete simultaneous board-game tables.
  *
- * Export: allocateTables({ members, games, fixedTables = [] }). IDs may be strings
+ * Export: allocateTables({ members, games, fixedTables = [], tieBreakSeed }). IDs may be strings
  * or numbers; output IDs retain their input type. `members` is the confirmed
  * attendance roster, so an available ownership offer represents one lendable
  * copy even when its owner plays at a different table.
@@ -34,8 +36,11 @@
  *
  * Returns { tables, unassignedMemberIds, warnings, score,
  *           feasiblePriorityMemberIds }.
- * Equal scores use stable ID order, not input order or randomness. History has
- * no involuntary-exclusion record, so this function does not invent seat credit.
+ * A meeting seed draws a stable order for otherwise equal optima. It cannot
+ * alter the seating, fairness or desire maxima. The same seed and inputs repeat
+ * exactly; another meeting gets another order. Standalone calls without a seed
+ * retain legacy ID order. History has no involuntary-exclusion record, so this
+ * function does not invent seat credit. See docs/meeting-tie-break.md.
  */
 
 const MAX_AUTOMATIC_MEMBERS = 12;
@@ -119,6 +124,7 @@ function betterScores(fairness, desire, other) {
 }
 
 export function allocateTables(input = {}) {
+  const draw = createMeetingTieBreak(input.tieBreakSeed);
   const warnings = [];
   const members = uniqueRecords(input.members, 'member', warnings).map(record => ({
     ...record,
@@ -268,12 +274,14 @@ export function allocateTables(input = {}) {
   }
 
   const automaticMembers = members.filter(member => !heldMembers.has(member.key));
+  if (draw) automaticMembers.sort((a, b) => draw.compare('member', a.key, b.key));
   const fixedSeated = fixedTables.reduce((count, table) => count + table.memberIds.length, 0);
   const finish = (automaticTables, automaticScore) => {
     const tables = [...fixedTables, ...automaticTables];
     const seated = new Set(tables.flatMap(table => table.memberIds.map(idKey)));
     return {
       tables,
+      ...(draw ? {tieBreak: {...draw.details}} : {}),
       unassignedMemberIds: members.filter(member => !seated.has(member.key)).map(member => member.id),
       warnings: [...new Set(warnings)].sort(compareKeys),
       score: {
@@ -301,11 +309,14 @@ export function allocateTables(input = {}) {
     firstIndices[mask] = 31 - Math.clz32(bit);
   }
 
+  // The exact DP still maximises the same three scores. Only traversal of
+  // otherwise tied solutions changes, using the fixed per-meeting draw.
+  const orderedGames = draw ? games.slice().sort((a, b) => draw.compare('game', a.key, b.key)) : games;
   let dp = new Array(size);
   dp[0] = { fairness: 0, desire: 0, previous: null, optionMask: 0, gameOptions: null };
-  for (const game of games) {
+  for (const game of orderedGames) {
     const owners = [...game.offers.values()].filter(offer => offer.own
-      && !heldCopies.has(copyKey(game.key, offer.userKey))).map(offer => offer.userKey).sort(compareKeys);
+      && !heldCopies.has(copyKey(game.key, offer.userKey))).map(offer => offer.userKey).sort(draw ? (a, b) => draw.compare('copy:' + game.key, a, b) : compareKeys);
     if (!owners.length) continue;
     const teachersAtCount = new Int32Array(count + 1);
     const eligibleAtCount = new Int32Array(count + 1);
@@ -407,7 +418,7 @@ export function allocateTables(input = {}) {
     let copyIndex = 0;
     while (remaining) {
       const mask = firstTable[remaining];
-      const tableMembers = automaticMembers.filter((_, index) => mask & (1 << index));
+      const tableMembers = automaticMembers.filter((_, index) => mask & (1 << index)).sort((a, b) => compareKeys(a.key, b.key));
       automaticTables.push({
         gameId: game.id,
         memberIds: tableMembers.map(member => member.id),

@@ -138,7 +138,8 @@ function planSnapshot(input, result) {
 }
 
 async function savePlan(env, member, meeting, input, fixedTables = null) {
-  const result = allocateTables(input);
+  // The meeting, not the click or caller, supplies the repeatable final draw.
+  const result = allocateTables({...input, tieBreakSeed:meeting.id});
   if (result.tables.filter(t=>t.fixed).length !== input.fixedTables.length) fail(422, result.warnings.join(' ') || 'A pre-arranged table has invalid players, counts, teacher or copy.');
   const plan = {...result,snapshot:planSnapshot(input,result)};
   const saved = await statement(env.DB,"UPDATE meetings SET plan_json=?,fixed_json=?,status='open',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status!='completed'",JSON.stringify(plan),JSON.stringify(input.fixedTables),Date.now(),meeting.id,meeting.revision).run();
@@ -196,7 +197,7 @@ export async function handleApi(request, env, ctx) {
     if (request.headers.get('origin') !== env.APP_URL) fail(403,'This request must come from the Collective website.');
     if (request.headers.get('sec-fetch-site') === 'cross-site') fail(403,'Cross-site requests are not accepted.');
   }
-  if (path === '/api/health' && request.method === 'GET') return json({ok:true,version:'1.1.0'});
+  if (path === '/api/health' && request.method === 'GET') return json({ok:true,version:'1.1.0',tieBreakMethod:'meeting-seeded-order-v1'});
   if (path === '/api/register' && request.method === 'POST') return register(request,env,ctx);
   const auth = createAuth(env,ctx);
   if (path.startsWith('/api/auth/')) {
