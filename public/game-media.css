@@ -11,3 +11,10 @@
 .vhbc-bgg-credit img{display:block;width:220px;height:63px;object-fit:contain}
 @media(max-width:500px){.vhbc-bgg-credit{padding:16px;justify-content:center;text-align:center}.vhbc-bgg-credit span{width:100%}}
 @media(prefers-reduced-motion:reduce){#vhbc-monthly-planner .vhbc-game-cover img{transition:none}}
+
+/* Four cards across on desktop; retain readable cards on smaller screens. */
+#vhbc-monthly-planner .mq-shelf{grid-template-columns:repeat(4,minmax(0,1fr));gap:22px}
+#vhbc-monthly-planner .mq-game h3{overflow-wrap:anywhere}
+@media(max-width:1050px){#vhbc-monthly-planner .mq-shelf{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:800px){#vhbc-monthly-planner .mq-shelf{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){#vhbc-monthly-planner .mq-shelf{grid-template-columns:1fr;gap:24px}}

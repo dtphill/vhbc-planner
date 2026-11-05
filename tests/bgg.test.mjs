@@ -191,7 +191,7 @@ test("valid cache avoids repeated network access and strips unknown stored field
     },
   };
   const result = await searchBgg(" MARIA ", { ...ENV, DB });
-  assert.equal(readArgs[0], "maria");
+  assert.equal(readArgs[0], "search:v2:maria");
   assert.ok(Number.isSafeInteger(readArgs[1]));
   assert.deepEqual(result.results, [{ title: "Maria", bggId: 40354, year: 2009 }]);
 });
@@ -211,7 +211,7 @@ test("bad cached data is ignored and successful results receive a bounded cache 
   const before = Date.now();
   const result = await searchBgg("Maria", { ...ENV, DB });
   assert.equal(result.externalAvailable, true);
-  assert.equal(written[0], "maria");
+  assert.equal(written[0], "search:v2:maria");
   assert.deepEqual(JSON.parse(written[1]), result.results);
   assert.ok(written[2] >= before + 24 * 60 * 60 * 1000);
   assert.ok(written[2] <= Date.now() + 24 * 60 * 60 * 1000);

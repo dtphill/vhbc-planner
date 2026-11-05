@@ -1,4 +1,5 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { rankSearchResults } from "./search-ranking.mjs";
 
 const SEARCH_ENDPOINT = "https://boardgamegeek.com/xmlapi2/search";
 const MAX_RESPONSE_BYTES = 256 * 1024;
@@ -99,7 +100,7 @@ async function readBoundedBody(response) {
   }
 }
 
-function parseSearchXml(xml) {
+function parseSearchXml(xml, query) {
   // The search endpoint has no need for DTDs or custom entities. Reject them
   // before the validator/parser can process any entity declarations.
   if (!xml.trim() || /<!\s*(?:DOCTYPE|ENTITY)\b/i.test(xml)) throw new Error("Unsupported XML declaration");
@@ -138,9 +139,9 @@ function parseSearchXml(xml) {
     if (!validResult(result)) continue;
     results.push(result);
     seen.add(bggId);
-    if (results.length === MAX_RESULTS) break;
   }
-  return results;
+  // Rank the complete bounded response before limiting it, so exact matches are not lost.
+  return rankSearchResults(results, query).slice(0, MAX_RESULTS);
 }
 
 /** Search BGG's authorised XML API2. All returned metadata comes from BGG. */
@@ -153,7 +154,7 @@ export async function searchBgg(query, env = {}) {
     return { results: [], externalAvailable: true, message: "Enter between 2 and 120 characters to search BoardGameGeek." };
   }
 
-  const key = term.toLowerCase();
+  const key = "search:v2:" + term.toLowerCase();
   const cached = await cachedResults(env?.DB, key);
   if (cached !== null) {
     return { results: cached, externalAvailable: true, message: cached.length ? "" : "No matching BoardGameGeek titles found. Try another title or add a game using its BGG link." };
@@ -182,7 +183,7 @@ export async function searchBgg(query, env = {}) {
       if (response.body) await response.body.cancel().catch(() => {});
       return unavailable("BoardGameGeek search is temporarily unavailable.");
     }
-    const results = parseSearchXml(await readBoundedBody(response));
+    const results = parseSearchXml(await readBoundedBody(response), term);
     await cacheResults(env?.DB, key, results);
     return { results, externalAvailable: true, message: results.length ? "" : "No matching BoardGameGeek titles found. Try another title or add a game using its BGG link." };
   } catch {
