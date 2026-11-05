@@ -1,0 +1,34 @@
+#vhbc-monthly-planner .ct-teaching{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin:3px 0 0;min-height:26px}
+#vhbc-monthly-planner .ct-teacher-wanted{font-size:11px;line-height:1.3;color:var(--mq-ochre);border:1px solid var(--mq-line);padding:2px 5px}
+#vhbc-monthly-planner .mq-game button.ct-teach{font-size:12px;min-height:26px;padding:3px 5px;line-height:1.3}
+#vhbc-monthly-planner .mq-game button.ct-teach[aria-pressed="true"]{background:var(--mq-ochre-soft);color:var(--mq-ink)}
+#vhbc-monthly-planner .ct-card-management{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0 6px}
+#vhbc-monthly-planner .ct-card-management .offer-edit{flex:1;text-align:left}
+#vhbc-monthly-planner .mq-game button.ct-delete{font-size:11px;min-height:26px;padding:3px 5px;line-height:1.3;color:light-dark(#874b41,#e0a194)}
+#vhbc-monthly-planner .ct-link-label{display:block;max-width:680px;font-size:13px;margin:12px 0}
+#vhbc-monthly-planner .ct-link-label input{display:block;width:100%;min-height:40px;margin-top:5px;padding:8px;border:1px solid var(--mq-line);background:var(--mq-surface);color:var(--mq-ink);font:inherit}
+#vhbc-monthly-planner .ct-show-password{display:flex;align-items:center;gap:8px;font-size:13px;min-height:28px}
+#vhbc-monthly-planner .ct-show-password input{width:auto;min-height:0;margin:0}
+#ct-teach-dialog{width:460px;max-width:calc(100vw - 32px);padding:24px}
+#ct-teach-dialog h2{font-size:23px;overflow-wrap:anywhere}
+#ct-teach-dialog p{font-size:14px;line-height:1.45}
+#ct-teach-dialog .ct-counts{display:flex;flex-wrap:wrap;gap:6px;border:0;padding:0;margin:14px 0 20px}
+#ct-teach-dialog .ct-counts legend{font-size:13px;margin-bottom:8px}
+#ct-teach-dialog .ct-counts label{cursor:pointer}
+#ct-teach-dialog .ct-counts input{position:absolute;opacity:0}
+#ct-teach-dialog .ct-counts span{display:grid;place-items:center;min-width:38px;min-height:36px;border:1px solid light-dark(#d7cbbb,#4c3d4f);font-size:14px}
+#ct-teach-dialog .ct-counts input:checked+span{background:light-dark(#4b285e,#d6b7e6);color:light-dark(#fbf4e5,#302037)}
+#ct-teach-dialog .ct-counts input:focus-visible+span{outline:2px solid #a37a2b;outline-offset:2px}
+#ct-teach-dialog .ct-dialog-actions{display:flex;flex-wrap:wrap;gap:8px}
+#ct-teach-dialog button{font-size:14px;min-height:36px;padding:7px 10px;cursor:pointer}
+#ct-teach-dialog .ct-stop{margin-top:14px;background:transparent;color:light-dark(#874b41,#e0a194);border:0}
+#ct-teach-dialog .ct-dialog-error{color:light-dark(#943b32,#e0a194)}
+@media(pointer:coarse){#vhbc-monthly-planner .mq-game button.ct-teach,#vhbc-monthly-planner .mq-game button.ct-delete{min-height:36px}#ct-teach-dialog .ct-counts span{min-width:44px;min-height:44px}}
+/* BGG's range is advisory. A selected out-of-range count stays fully highlighted. */
+#vhbc-monthly-planner .count-options button.ct-outside:not([aria-pressed="true"]){color:var(--mq-muted);background:var(--mq-soft);border-style:dashed;opacity:.78}
+#vhbc-monthly-planner .count-options button.ct-outside[aria-pressed="true"]{opacity:1}
+#ct-teach-dialog .ct-counts label.ct-outside input:not(:checked)+span{color:light-dark(#6b5e68,#bdb0ba);background:light-dark(#ede4d5,#352a39);border-style:dashed;opacity:.78}
+#vhbc-monthly-planner .ct-count-guidance,#ct-teach-dialog .ct-count-guidance{font-size:12px;line-height:1.4;margin:6px 0 0}
+#vhbc-monthly-planner .ct-link-status{font-size:12px;margin:2px 0 0;line-height:1.4}
+#vhbc-monthly-planner .ct-link-preview{display:inline-flex;justify-self:start;max-width:100px;align-items:center;justify-content:center;padding:4px;border:1px solid var(--mq-line);background:var(--mq-soft)}
+#vhbc-monthly-planner .ct-link-preview img{display:block;width:72px;height:88px;object-fit:contain}
