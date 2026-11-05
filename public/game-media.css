@@ -1,0 +1,13 @@
+/* Covers retain their original colours and proportions. */
+#vhbc-monthly-planner .vhbc-game-cover{display:flex;position:relative;align-items:center;justify-content:center;min-height:128px;height:128px;margin:0 0 14px;border:1px solid var(--mq-line);background:var(--mq-soft);text-decoration:none;overflow:hidden;isolation:isolate}
+#vhbc-monthly-planner .vhbc-game-cover img{position:absolute;inset:8px;width:calc(100% - 16px);height:calc(100% - 16px);object-fit:contain;opacity:0;transition:opacity .15s ease}
+#vhbc-monthly-planner .vhbc-cover-loaded img{opacity:1}
+#vhbc-monthly-planner .vhbc-cover-placeholder{font-family:Georgia,serif;font-size:30px;letter-spacing:.08em;color:var(--mq-muted);opacity:.6}
+#vhbc-monthly-planner .vhbc-cover-loaded .vhbc-cover-placeholder{visibility:hidden}
+#vhbc-monthly-planner .mq-review-title .vhbc-game-cover{width:100%;max-width:220px;min-height:150px;height:150px;flex:none}
+#vhbc-monthly-planner a.vhbc-game-cover:focus-visible{outline:3px solid var(--mq-accent);outline-offset:3px}
+.vhbc-bgg-credit{max-width:1120px;margin:24px auto 0;padding:16px 24px 26px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font:12px/1.5 system-ui,sans-serif;color:inherit;border-top:1px solid #ad8c5f55}
+.vhbc-bgg-credit>a{display:inline-flex;align-items:center;background:#fbf8f1;padding:4px 12px;border-radius:2px;text-decoration:none}
+.vhbc-bgg-credit img{display:block;width:220px;height:63px;object-fit:contain}
+@media(max-width:500px){.vhbc-bgg-credit{padding:16px;justify-content:center;text-align:center}.vhbc-bgg-credit span{width:100%}}
+@media(prefers-reduced-motion:reduce){#vhbc-monthly-planner .vhbc-game-cover img{transition:none}}
