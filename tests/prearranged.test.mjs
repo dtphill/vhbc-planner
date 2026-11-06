@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {withPrearrangedTables,validateReservation} from '../src/prearranged-tables.mjs';
+const origin='https://collective.test';
+function fixture() {
+  const data={user:{id:'a',role:'member'},meeting:{date:'2030-01-27',label:'Sunday, 27 January 2030'},members:['a','b','c','d'].map(id=>({id,name:id.toUpperCase(),coming:true})),games:[{id:'g',title:'Game',offers:[{userId:'a',name:'A',own:true,teach:true,counts:[2,3],pitch:''},{userId:'c',name:'C',own:true,teach:true,counts:[2,3],pitch:''}]}]};
+  const body={gameId:'g',memberIds:['a','b'],teacherId:'a',copyOwnerId:'a',agreed:true,meetingDate:data.meeting.date,revision:0};
+  return {data,body,ratings:new Map([['a','want'],['b','will'],['c','want'],['d','will']])};
+}
+function setup() {
+  const sqlite=new DatabaseSync(':memory:');
+  sqlite.exec(`CREATE TABLE meetings(id TEXT PRIMARY KEY,status TEXT,revision INTEGER,fixed_json TEXT,plan_json TEXT,updated_at INTEGER);
+CREATE TABLE meeting_exclusions(meeting_id TEXT PRIMARY KEY);
+CREATE TABLE audit_log(id TEXT PRIMARY KEY,actor_id TEXT,action TEXT,meeting_id TEXT,created_at INTEGER);
+CREATE TABLE ratings(user_id TEXT,game_id TEXT,value TEXT);`);
+  const f=fixture();
+  sqlite.prepare('INSERT INTO meetings VALUES (?,?,?,?,?,?)').run(f.data.meeting.date,'open',0,'[]','{"tables":[]}',0);
+  for (const [id,rating] of f.ratings) sqlite.prepare('INSERT INTO ratings VALUES (?,?,?)').run(id,'g',rating);
+  const DB={prepare(sql){return {args:[],bind(...args){this.args=args;return this;},async first(){return sqlite.prepare(sql).get(...this.args)||null;},async all(){return {results:sqlite.prepare(sql).all(...this.args)};},async run(){return {meta:{changes:sqlite.prepare(sql).run(...this.args).changes}};}};},async batch(list){sqlite.exec('BEGIN');try{const out=[];for(const s of list)out.push(await s.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
+  const base={async fetch(){return Response.json(f.data);}};
+  const app=withPrearrangedTables(base,{javascript:'/* client */',css:'/* css */'});
+  async function call(body=f.body,path='/api/prearranged/reserve',method='POST',headers={}) {
+    return app.fetch(new Request(origin+path,{method,headers:{Origin:origin,'Content-Type':'application/json',...headers},...(method==='GET'?{}:{body:JSON.stringify(body)})}),{DB,APP_URL:origin},{});
+  }
+  return {...f,sqlite,DB,app,base,call};
+}
+function rejects(fn, status) { assert.throws(fn,e=>e.status===status); }
+test('valid member-created table is canonical and ignores arbitrary client fields',()=>{const f=fixture();assert.deepEqual(validateReservation(f.data,[],{...f.body,role:'admin',memberIds:['b','a']},f.ratings),{gameId:'g',memberIds:['a','b'],teacherId:'a',copyOwnerId:'a'});});
+test('ordinary members must include themselves; organisers can create for others',()=>{const f=fixture();f.body={...f.body,memberIds:['c','d'],teacherId:'c',copyOwnerId:'c'};rejects(()=>validateReservation(f.data,[],f.body,f.ratings),403);f.data.user.role='admin';assert.equal(validateReservation(f.data,[],f.body,f.ratings).teacherId,'c');});
+test('explicit agreement is required',()=>{const f=fixture();rejects(()=>validateReservation(f.data,[],{...f.body,agreed:false},f.ratings),400);});
+test('duplicate, undersized and oversized tables are rejected',()=>{const f=fixture();for(const ids of [['a','a'],['a'],Array(13).fill('a')])rejects(()=>validateReservation(f.data,[],{...f.body,memberIds:ids},f.ratings),400);});
+test('non-attendees and rejected or unrated games cannot be reserved',()=>{const f=fixture();f.data.members[1].coming=false;rejects(()=>validateReservation(f.data,[],f.body,f.ratings),422);f.data.members[1].coming=true;for(const r of ['pass',null]){f.ratings.set('b',r);rejects(()=>validateReservation(f.data,[],f.body,f.ratings),422);}});
+test('teacher must be a selected player offering the exact count',()=>{const f=fixture();rejects(()=>validateReservation(f.data,[],{...f.body,teacherId:'c'},f.ratings),422);f.data.games[0].offers[0].counts=[5];rejects(()=>validateReservation(f.data,[],f.body,f.ratings),422);});
+test('each player count restriction is retained',()=>{const f=fixture();f.data.games[0].offers.push({userId:'b',own:false,teach:false,counts:[3]});rejects(()=>validateReservation(f.data,[],f.body,f.ratings),422);});
+test('owner may play elsewhere but must attend and supply a free copy',()=>{const f=fixture();assert.equal(validateReservation(f.data,[],{...f.body,copyOwnerId:'c'},f.ratings).copyOwnerId,'c');f.data.members[2].coming=false;rejects(()=>validateReservation(f.data,[],{...f.body,copyOwnerId:'c'},f.ratings),422);});
+test('duplicate reservations of a player or a copy are rejected',()=>{const f=fixture();rejects(()=>validateReservation(f.data,[{gameId:'other',memberIds:['b','c'],copyOwnerId:'c'}],f.body,f.ratings),409);rejects(()=>validateReservation(f.data,[{gameId:'g',memberIds:['c','d'],copyOwnerId:'a'}],f.body,f.ratings),409);});
+test('options require membership and do not expose member emails or ratings',async()=>{const f=setup();f.data.user.email='private@test';const r=await f.call(null,'/api/prearranged/options','GET');assert.equal(r.status,200);const text=await r.text();assert.ok(!text.includes('private@test'));assert.ok(!text.includes('ratings'));f.data.user=null;assert.equal((await f.call(null,'/api/prearranged/options','GET')).status,401);f.sqlite.close();});
+test('same-origin and supported methods are enforced',async()=>{const f=setup();assert.equal((await f.call(f.body,undefined,'POST',{Origin:'https://evil.test'})).status,403);assert.equal((await f.call(f.body,undefined,'POST',{'Sec-Fetch-Site':'cross-site'})).status,403);assert.equal((await f.call(null,'/api/prearranged/reserve','GET')).status,405);assert.equal((await f.call(f.body,'/api/prearranged/options','POST')).status,405);f.sqlite.close();});
+test('save appends only one table, clears old recommendations and records audit',async()=>{const f=setup();const existing={gameId:'g',memberIds:['c','d'],teacherId:'c',copyOwnerId:'c'};f.sqlite.prepare('UPDATE meetings SET fixed_json=?').run(JSON.stringify([existing]));const r=await f.call();assert.equal(r.status,200,await r.clone().text());const row=f.sqlite.prepare('SELECT * FROM meetings').get();assert.deepEqual(JSON.parse(row.fixed_json),[existing,{gameId:'g',memberIds:['a','b'],teacherId:'a',copyOwnerId:'a'}]);assert.equal(row.plan_json,null);assert.equal(row.revision,1);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM audit_log').get().n,1);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM ratings').get().n,4);f.sqlite.close();});
+test('stale meeting date and revision are rejected without changing tables',async()=>{const f=setup();for(const body of [{...f.body,meetingDate:'2030-02-24'},{...f.body,revision:1},{...f.body,revision:undefined}])assert.equal((await f.call(body)).status,409);assert.equal(f.sqlite.prepare('SELECT fixed_json FROM meetings').get().fixed_json,'[]');f.sqlite.close();});
+test('confirmed, recorded or removed meetings cannot be changed',async()=>{const f=setup();for(const status of ['locked','completed']){f.sqlite.prepare('UPDATE meetings SET status=?').run(status);assert.equal((await f.call()).status,409);}f.sqlite.prepare("UPDATE meetings SET status='open'").run();f.sqlite.prepare('INSERT INTO meeting_exclusions VALUES (?)').run(f.body.meetingDate);assert.equal((await f.call()).status,409);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM audit_log').get().n,0);f.sqlite.close();});
+test('repeated submission cannot add the same table twice',async()=>{const f=setup();assert.equal((await f.call()).status,200);assert.equal((await f.call()).status,409);assert.equal(JSON.parse(f.sqlite.prepare('SELECT fixed_json FROM meetings').get().fixed_json).length,1);f.sqlite.close();});
+test('optimistic lock also catches a concurrent write during validation',async()=>{const f=setup();const batch=f.DB.batch.bind(f.DB);f.DB.batch=async list=>{f.sqlite.exec('UPDATE meetings SET revision=revision+1');return batch(list);};assert.equal((await f.call()).status,409);assert.equal(f.sqlite.prepare('SELECT fixed_json FROM meetings').get().fixed_json,'[]');assert.equal(f.sqlite.prepare('SELECT count(*) n FROM audit_log').get().n,0);f.sqlite.close();});
+test('markup loads same-origin assets and preserves existing security policy',async()=>{const base={async fetch(){return new Response('<html><head></head><body>Existing planner</body></html>',{headers:{'Content-Type':'text/html','Content-Security-Policy':"script-src 'self';"}});}};const app=withPrearrangedTables(base,{javascript:'client',css:'style'});const r=await app.fetch(new Request(origin),{},{});assert.equal(r.headers.get('Content-Security-Policy'),"script-src 'self';");const text=await r.text();assert.ok(text.includes('Existing planner'));assert.ok(text.includes('/media/prearranged.js?v=1.3.1'));assert.ok(text.includes('/media/prearranged.css?v=1.3.1'));});

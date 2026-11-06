@@ -1,0 +1,12 @@
+/* Secondary option: preference-setting and attendance remain the main actions. */
+#vhbc-monthly-planner .vhbc-prearranged{margin:12px 0 18px;padding:0;border:0;color:var(--mq-muted)}
+#vhbc-monthly-planner .vhbc-prearranged>summary{display:list-item;width:fit-content;min-height:30px;padding:5px 0;font-size:13px;font-weight:400;color:var(--mq-muted);cursor:pointer}
+#vhbc-monthly-planner .vhbc-prearranged>summary:hover{color:var(--mq-accent)}
+#vhbc-monthly-planner .vhbc-prearranged>summary:focus-visible{outline:2px solid var(--mq-ochre);outline-offset:3px}
+#vhbc-monthly-planner .vhbc-reservation-content{max-width:700px;padding:8px 0 14px;color:var(--mq-ink)}
+#vhbc-monthly-planner .vhbc-reservation-content>p{margin:0 0 12px}
+#vhbc-monthly-planner .vhbc-reservation-form{gap:12px}
+#vhbc-monthly-planner .vhbc-reserved{padding:0 0 10px;margin:0 0 12px;border-bottom:1px solid var(--mq-line);font-size:13px}
+#vhbc-monthly-planner .vhbc-reserved p{margin:3px 0}
+#vhbc-monthly-planner .vhbc-reservation-message{font-size:13px;overflow-wrap:anywhere}
+@media(pointer:coarse){#vhbc-monthly-planner .vhbc-prearranged>summary{min-height:40px;padding:9px 0}}
