@@ -23,7 +23,7 @@ export function parseGameDetails(xml,id){
  const doc=xml.replace(/<!--[\s\S]*?-->/g,'').trim();
  if(!/^(?:<\?xml[^?]*\?>\s*)?<items(?:\s[^>]*)?>[\s\S]*<\/items>\s*$/.test(doc))throw new Error('Invalid item metadata');
  for(const match of doc.matchAll(/<item\b([^>]*)>([\s\S]*?)<\/item>/g)){
-  const item=attributes(match[1]);if(item.type!=='boardgame'||Number(item.id)!==id)continue;
+  const item=attributes(match[1]);if(!['boardgame','boardgameexpansion'].includes(item.type)||Number(item.id)!==id)continue;
   const names=[...match[2].matchAll(/<name\b([^>]*)\/?\s*>/g)].map(m=>attributes(m[1]));
   const title=names.find(n=>n.type==='primary')?.value?.replace(/\s+/gu,' ').trim();
   if(!title||title.length>300||/[\u0000-\u001f\u007f]/u.test(title))throw new Error('Invalid game title');
@@ -56,7 +56,7 @@ export async function lookupGameDetails(env,id){
  if(!gate)return fallback('BGG lookup is busy. You can keep entering the game manually.',2);
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),6500);
  try{
-  const target=new URL('https://boardgamegeek.com/xmlapi2/thing');target.searchParams.set('id',String(id));target.searchParams.set('type','boardgame');
+  const target=new URL('https://boardgamegeek.com/xmlapi2/thing');target.searchParams.set('id',String(id));target.searchParams.set('type','boardgame,boardgameexpansion');
   const response=await fetch(target,{headers:{Authorization:'Bearer '+env.BGG_TOKEN.trim(),Accept:'application/xml, text/xml'},redirect:'manual',signal:controller.signal});
   if(!response.ok||response.status===202){await response.body?.cancel();return fallback('BGG lookup is unavailable. You can enter the title manually.',[202,429].includes(response.status)?15:0);}
   const game=parseGameDetails(await readXml(response),id);if(!game)return fallback('No board game was found for that link. You can enter the details manually.');

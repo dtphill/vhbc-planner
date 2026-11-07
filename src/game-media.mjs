@@ -1,5 +1,5 @@
 /** Optional BGG artwork layer. Accounts, preferences and allocation stay in the base Worker. */
-export const MEDIA_VERSION = '1.2.1';
+export const MEDIA_VERSION = '1.2.2';
 // Unmodified Powered by BGG lockup. Source/provenance is recorded in docs/game-media.md.
 export const BADGE_URL = 'https://dm1i7q1ruvbhg.cloudfront.net/assets/powered_by_bgg-9f2993c7fad826d5407c35b5c8117b08d2a6cdf5beb1f0c02d06a7dc7f5cdd7f.png';
 const DAY = 86400000;
@@ -33,7 +33,7 @@ export function parseThumbnails(xml, ids) {
   const found = new Map();
   for (const match of document.matchAll(/<item\b([^>]*)>([\s\S]*?)<\/item>/g)) {
     const idMatch=/(?:^|\s)id\s*=\s*(["'])([1-9]\d*)\1/.exec(match[1]);
-    const typeMatch=/(?:^|\s)type\s*=\s*(["'])boardgame\1/.exec(match[1]);
+    const typeMatch=/(?:^|\s)type\s*=\s*(["'])(?:boardgame|boardgameexpansion)\1/.exec(match[1]);
     const id=Number(idMatch?.[2]);
     if (!typeMatch || !wanted.has(id) || found.has(id)) continue;
     const raw=/<thumbnail(?:\s[^>]*)?>([\s\S]*?)<\/thumbnail>/.exec(match[2]);
@@ -85,7 +85,7 @@ export async function thumbnailResponse(request, env, ctx, base) {
   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),10000);
   try {
     const target=new URL('https://boardgamegeek.com/xmlapi2/thing');
-    target.searchParams.set('id',pending.join(',')); target.searchParams.set('type','boardgame');
+    target.searchParams.set('id',pending.join(',')); target.searchParams.set('type','boardgame,boardgameexpansion');
     const response=await fetch(target,{headers:{Authorization:'Bearer '+env.BGG_TOKEN.trim(),Accept:'application/xml, text/xml'},redirect:'manual',signal:controller.signal});
     if (!response.ok || response.status===202) {
       await response.body?.cancel();
