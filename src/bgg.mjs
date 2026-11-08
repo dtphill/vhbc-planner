@@ -52,7 +52,7 @@ async function cachedResults(db, query) {
     if (typeof row?.response !== "string" || row.response.length > MAX_RESPONSE_BYTES) return null;
     const results = JSON.parse(row.response);
     if (!Array.isArray(results) || results.length > MAX_RESULTS || !results.every(validResult)) return null;
-    return results.map(({ title, bggId, year }) => ({ title, bggId, year }));
+    return results.map(({ title, bggId, year, isExpansion }) => ({ title, bggId, year, ...(isExpansion === true ? {isExpansion:true} : {}) }));
   } catch {
     // Cache availability must not block a configured BGG search.
     return null;
@@ -100,7 +100,7 @@ async function readBoundedBody(response) {
   }
 }
 
-function parseSearchXml(xml, query) {
+export function parseSearchXml(xml, query, includeExpansions = false) {
   // The search endpoint has no need for DTDs or custom entities. Reject them
   // before the validator/parser can process any entity declarations.
   if (!xml.trim() || /<!\s*(?:DOCTYPE|ENTITY)\b/i.test(xml)) throw new Error("Unsupported XML declaration");
@@ -125,7 +125,7 @@ function parseSearchXml(xml, query) {
   const results = [];
   const seen = new Set();
   for (const item of items) {
-    if (!item || item["@_type"] !== "boardgame" || !/^[1-9]\d*$/.test(String(item["@_id"] ?? ""))) continue;
+    if (!item || !(item["@_type"] === "boardgame" || (includeExpansions && item["@_type"] === "boardgameexpansion")) || !/^[1-9]\d*$/.test(String(item["@_id"] ?? ""))) continue;
     const bggId = Number(item["@_id"]);
     if (!Number.isSafeInteger(bggId) || seen.has(bggId)) continue;
     const names = Array.isArray(item.name) ? item.name : [item.name];
@@ -135,17 +135,16 @@ function parseSearchXml(xml, query) {
     const rawYear = item.yearpublished?.["@_value"];
     const numericYear = /^-?\d+$/.test(String(rawYear ?? "")) ? Number(rawYear) : NaN;
     const year = Number.isSafeInteger(numericYear) && numericYear !== 0 && Math.abs(numericYear) <= 9999 ? numericYear : null;
-    const result = { title, bggId, year };
+    const result = { title, bggId, year, ...(item["@_type"] === "boardgameexpansion" ? {isExpansion:true} : {}) };
     if (!validResult(result)) continue;
     results.push(result);
     seen.add(bggId);
   }
-  // Rank the complete bounded response before limiting it, so exact matches are not lost.
   return rankSearchResults(results, query).slice(0, MAX_RESULTS);
 }
 
 /** Search BGG's authorised XML API2. All returned metadata comes from BGG. */
-export async function searchBgg(query, env = {}) {
+export async function searchBgg(query, env = {}, includeExpansions = false) {
   const token = typeof env?.BGG_TOKEN === "string" ? env.BGG_TOKEN.trim() : "";
   if (!token) return unavailable("BoardGameGeek search has not been connected yet.");
 
@@ -154,7 +153,7 @@ export async function searchBgg(query, env = {}) {
     return { results: [], externalAvailable: true, message: "Enter between 2 and 120 characters to search BoardGameGeek." };
   }
 
-  const key = "search:v2:" + term.toLowerCase();
+  const key = (includeExpansions ? "search:v3:expansions:" : "search:v2:") + term.toLowerCase();
   const cached = await cachedResults(env?.DB, key);
   if (cached !== null) {
     return { results: cached, externalAvailable: true, message: cached.length ? "" : "No matching BoardGameGeek titles found. Try another title or add a game using its BGG link." };
@@ -162,7 +161,7 @@ export async function searchBgg(query, env = {}) {
 
   const url = new URL(SEARCH_ENDPOINT);
   url.searchParams.set("query", term);
-  url.searchParams.set("type", "boardgame");
+  url.searchParams.set("type", includeExpansions ? "boardgame,boardgameexpansion" : "boardgame");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -183,7 +182,7 @@ export async function searchBgg(query, env = {}) {
       if (response.body) await response.body.cancel().catch(() => {});
       return unavailable("BoardGameGeek search is temporarily unavailable.");
     }
-    const results = parseSearchXml(await readBoundedBody(response), term);
+    const results = parseSearchXml(await readBoundedBody(response), term, includeExpansions);
     await cacheResults(env?.DB, key, results);
     return { results, externalAvailable: true, message: results.length ? "" : "No matching BoardGameGeek titles found. Try another title or add a game using its BGG link." };
   } catch {

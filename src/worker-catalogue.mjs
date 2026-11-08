@@ -1,0 +1,10 @@
+import base from './worker-prearranged.mjs';
+import {withCatalogueEnhancements} from './catalogue-enhancements.mjs';
+import {searchBgg} from './bgg.mjs';
+import {rankSearchResults} from './search-ranking.mjs';
+import {parseThumbnails,boundedBytes} from './game-media.mjs';
+import javascript from '../public/catalogue-tools.js';
+import css from '../public/catalogue-tools.css';
+import artworkCache from '../public/artwork-cache.js';
+import artworkClient from '../public/game-media.js';
+export default withCatalogueEnhancements(base,{javascript,css,artworkCache,artworkClient},{searchBgg,rankSearchResults,parseThumbnails,boundedBytes});
