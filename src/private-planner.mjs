@@ -1,7 +1,7 @@
 import {allocateTables} from './allocation.mjs';
 import {localDate, fourthSunday, TIME_ZONE} from './calendar.mjs';
 
-export const PRIVATE_PLANNER_VERSION = '1.4.1';
+export const PRIVATE_PLANNER_VERSION = '1.4.2';
 export const PRIVATE_PAGE = '/admin/planner-test';
 export const PRIVATE_API = '/api/admin/planner-test';
 const headers = {
@@ -32,6 +32,10 @@ export function readOnlyDatabase(db) {
   };
   const methods = {
     prepare(sql) {
+      // Better Auth checks index metadata while validating its schema. Translate
+      // only these two read-only PRAGMAs, not arbitrary PRAGMA commands.
+      const inspection = typeof sql==='string' && /^\s*PRAGMA\s+(index_list|index_info)\(\s*('(?:[^'\u0000-\u001f;]|'')*')\s*\)\s*$/i.exec(sql);
+      if (inspection) sql='SELECT * FROM pragma_'+inspection[1].toLowerCase()+'('+inspection[2]+')';
       if (typeof sql!=='string' || !/^\s*SELECT\b/i.test(sql) || /;/.test(sql)) {
         throw new Error('Private planner permits SELECT statements only.');
       }
@@ -60,7 +64,7 @@ async function requireAdmin(request, env, ctx, sessionFor) {
   // still rejects any unexpected mutation, including expired-session cleanup.
   let auth;
   try { auth=await sessionFor(request,env); }
-  catch { fail(401,'Please sign in again as an organiser.'); }
+  catch { fail(503,'Your sign-in could not be checked. Please try again. No meeting data has changed.'); }
   if (!auth?.user?.id || !auth?.session) fail(401,'Please sign in as an organiser.');
   const member = await env.DB.prepare('SELECT user_id,role,disabled FROM members WHERE user_id=?').bind(auth.user.id).first();
   if (!member || member.disabled || member.role!=='admin') fail(403,'Only organisers can use the private algorithm test.');
@@ -198,7 +202,7 @@ export function withPrivatePlanner(base, assets, sessionFor) {
       } catch(error) {
         const status=error instanceof PrivatePlannerError?error.status:503;
         // Fixed text only: never interpolate a database value or a thrown error.
-        return new Response(request.method==='HEAD'?null:page('Sign in with an active organiser account to access this private area.'),{status,headers:{...headers,'Content-Type':'text/html; charset=utf-8'}});
+        return new Response(request.method==='HEAD'?null:page(status===401 ? 'Sign in with an active organiser account to access this private area.' : status===403 ? 'Only active organisers can use the private algorithm test.' : 'Your sign-in could not be checked. Please try again. No meeting data has changed.'),{status,headers:{...headers,'Content-Type':'text/html; charset=utf-8'}});
       }
     }
     if(['/media/private-planner.js','/media/private-planner.css'].includes(path)){
