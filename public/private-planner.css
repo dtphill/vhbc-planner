@@ -1,0 +1,37 @@
+/* Admin-only, read-only workspace; reuse the planner's purple/ochre palette. */
+#vhbc-monthly-planner .ppt-launch{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;margin:12px 0 22px;border:1px solid var(--mq-line);border-left:3px solid var(--mq-ochre);background:var(--mq-surface)}
+#vhbc-monthly-planner .ppt-launch h3{font-size:20px;margin:0 0 4px}
+#vhbc-monthly-planner .ppt-launch p{margin:0}
+#vhbc-monthly-planner .ppt-open{flex:none;display:inline-block;padding:8px 12px;border:1px solid var(--mq-line);text-decoration:none;font-size:14px}
+#vhbc-monthly-planner .ppt-open:hover{background:var(--mq-soft)}
+#private-planner-root{max-width:1100px;margin:0 auto}
+#private-planner-root .ppt-heading{margin-top:24px}
+#private-planner-root h1{font:400 32px/1.2 Palatino,Georgia,serif;color:var(--mq-accent);margin:8px 0 14px}
+#private-planner-root .ppt-private,#private-planner-root .ppt-eyebrow{font-size:12px;letter-spacing:.02em;color:var(--mq-muted)}
+#private-planner-root .ppt-boundary{max-width:850px;padding:12px 16px;border-left:3px solid var(--mq-ochre);background:var(--mq-soft);font-size:14px}
+#private-planner-root #ppt-status{margin:12px 0 24px;max-width:850px}
+#private-planner-root .ppt-result-heading{border-top:1px solid var(--mq-ochre);padding-top:20px}
+#private-planner-root .ppt-result-heading h2{font:400 25px/1.25 Palatino,Georgia,serif;color:var(--mq-accent);margin:0}
+#private-planner-root .ppt-scores{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:12px;margin:18px 0 25px}
+#private-planner-root .ppt-scores>div{padding:12px 14px;border:1px solid var(--mq-line);background:var(--mq-surface)}
+#private-planner-root .ppt-scores strong{display:block;font-size:20px;color:var(--mq-accent)}
+#private-planner-root .ppt-scores span{display:block;font-size:12px;color:var(--mq-muted);margin-top:3px}
+#private-planner-root .ppt-tables{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+#private-planner-root .ppt-table{min-width:0;border-top:1px solid var(--mq-ochre);padding-top:8px}
+#private-planner-root .ppt-table h3{font-size:23px;overflow-wrap:anywhere}
+#private-planner-root .ppt-eyebrow{margin:0 0 8px}
+#private-planner-root .ppt-players{list-style:none;margin:12px 0;padding:0}
+#private-planner-root .ppt-players li{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--mq-line);overflow-wrap:anywhere}
+#private-planner-root .ppt-preference{flex:none;font-size:12px;color:var(--mq-muted)}
+#private-planner-root .ppt-priority{color:var(--mq-accent);font-weight:600}
+#private-planner-root .ppt-reason{font-size:13px;color:var(--mq-muted)}
+#private-planner-root .ppt-warnings,#private-planner-root .ppt-unseated{border-left:3px solid var(--mq-ochre);padding:10px 16px;margin:16px 0 24px;background:var(--mq-soft)}
+#private-planner-root .ppt-warnings li{overflow-wrap:anywhere}
+#private-planner-root .ppt-detail{border-top:1px solid var(--mq-line);margin-top:24px;font-size:14px}
+#private-planner-root .ppt-detail summary{cursor:pointer;font-size:15px}
+#private-planner-root .ppt-scroll{overflow-x:auto}
+#private-planner-root table{width:100%;border-collapse:collapse;font-size:13px}
+#private-planner-root th,#private-planner-root td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--mq-line);overflow-wrap:anywhere}
+#private-planner-root .ppt-priority-state{display:block;color:var(--mq-muted);font-size:12px;margin-top:4px}
+#private-planner-root .ppt-footnote{font-size:12px;color:var(--mq-muted);margin-top:24px}
+@media(max-width:650px){#vhbc-monthly-planner .ppt-launch{align-items:flex-start;flex-direction:column;gap:10px}#private-planner-root .ppt-tables{grid-template-columns:1fr}#private-planner-root .ppt-scores{grid-template-columns:1fr 1fr}#private-planner-root .ppt-scores>div:last-child{grid-column:1/-1}#private-planner-root h1{font-size:28px}#private-planner-root th,#private-planner-root td{padding:7px 5px}}
