@@ -1,4 +1,5 @@
 import {createMeetingTieBreak} from './tie-break.mjs';
+import {allocationBonuses, rotationPoints, ROTATION_POLICY} from './rotation-policy.mjs';
 
 /**
  * Pure, deterministic allocation of complete simultaneous board-game tables.
@@ -17,14 +18,19 @@ import {createMeetingTieBreak} from './tie-break.mjs';
  * `history.priorityFeasible === true` is a saved planning-time observation;
  * missing/false values earn no unmet-priority credit. Fixed plays earn no credit
  * and do not age other credit, but actually playing a priority fulfils it.
- * Four recent non-fixed plays are considered; each history bonus is capped at 2.
+ * Four recent non-fixed plays determine capped fairness bonuses. A played
+ * priority rests for four other attended plays (including reserved plays).
  * Current feasibility means at least one valid table after fixed reservations,
  * not a guarantee that it coexists with every other preferred table.
  *
- * Ranking is lexicographic: seated people, bounded priority/fairness value,
- * then current desire. A priority is worth 6; up to 2 points each recognise
+ * Ranking is lexicographic: seated people, eligible priority boosts, personal
+ * game rotation, accommodation credit, then current desire. An eligible priority
+ * is worth 6; up to 2 points each recognise
  * recent accommodation and explicitly recorded unmet feasible priorities.
  * Want earns the accommodation bonus; Will does not. Desire is Want=2, Will=1.
+ * Rotation favours games absent from each player's retained history, then those
+ * played longest ago. It never sacrifices seating or eligible priority boosts.
+ * Accommodation follows rotation so it cannot create another permanent repeat.
  * Scores of fixed tables are constant and have no priority/fairness contribution.
  *
  * Exact member-mask DP processes each game once. Its local options partition
@@ -37,16 +43,13 @@ import {createMeetingTieBreak} from './tie-break.mjs';
  * Returns { tables, unassignedMemberIds, warnings, score,
  *           feasiblePriorityMemberIds }.
  * A meeting seed draws a stable order for otherwise equal optima. It cannot
- * alter the seating, fairness or desire maxima. The same seed and inputs repeat
+ * alter the seating, fairness, rotation or desire maxima. The same seed and inputs repeat
  * exactly; another meeting gets another order. Standalone calls without a seed
  * retain legacy ID order. History has no involuntary-exclusion record, so this
  * function does not invent seat credit. See docs/meeting-tie-break.md.
  */
 
 const MAX_AUTOMATIC_MEMBERS = 12;
-const HISTORY_WINDOW = 4;
-const BONUS_CAP = 2;
-const PRIORITY_VALUE = 6;
 const accepted = rating => rating === 'want' || rating === 'will';
 const idKey = id => (typeof id === 'string' && id.length > 0)
   || (typeof id === 'number' && Number.isFinite(id)) ? String(id) : null;
@@ -76,30 +79,6 @@ function uniqueRecords(records, label, warnings) {
   });
 }
 
-function accommodationBonus(member) {
-  const recent = member.history.filter(play => play && !play.fixed
-    && idKey(play.gameId) !== null && accepted(play.rating)).slice(-HISTORY_WINDOW);
-  return Math.min(BONUS_CAP, recent.filter(play => play.rating === 'will').length);
-}
-
-function priorityWaitingBonus(member) {
-  if (member.priorityKey === null) return 0;
-  let opportunities = 0;
-  let bonus = 0;
-  for (let index = member.history.length - 1; index >= 0; index -= 1) {
-    const play = member.history[index];
-    if (!play || idKey(play.gameId) === null) continue;
-    if (idKey(play.gameId) === member.priorityKey) break;
-    if (play.fixed || !accepted(play.rating)) continue;
-    // A different priority ends this request's waiting history.
-    if (idKey(play.priorityGameId) !== member.priorityKey) break;
-    opportunities += 1;
-    if (play.priorityFeasible === true) bonus += 1;
-    if (opportunities >= HISTORY_WINDOW) break;
-  }
-  return Math.min(BONUS_CAP, bonus);
-}
-
 function allowsCount(member, gameKey, count) {
   return !member.restrictions.has(gameKey) || member.restrictions.get(gameKey).has(count);
 }
@@ -114,13 +93,21 @@ function tableReason(game, tableMembers) {
   if (will.length) parts.push(`${will.length} willing ${will.length === 1 ? 'assignment' : 'assignments'}`);
   const boosted = tableMembers.filter(member => member.ratings[game.key] === 'want'
     && (member.accommodation > 0 || (member.priorityKey === game.key && member.waiting > 0)));
-  return `${parts.join('; ')}.${boosted.length
+  const resting = tableMembers.filter(member => member.priorityKey === game.key && member.priorityRest > 0);
+  const fresh = tableMembers.filter(member => rotationPoints(member, game.key) === 25).length;
+  return `${parts.join('; ')}. ${fresh} players have not played this in their retained history.${resting.length
+    ? ` Recently fulfilled priority boosts are resting for ${resting.map(member => member.name).join(', ')}.` : ''}${boosted.length
     ? ` Recent accommodation or unmet-priority history favours ${boosted.map(member => member.name).join(', ')}.`
     : ''}`;
 }
 
-function betterScores(fairness, desire, other) {
-  return !other || fairness > other.fairness || (fairness === other.fairness && desire > other.desire);
+function betterScores(fairness, rotation, accommodation, desire, other) {
+  if (!other) return true;
+  const priority = fairness - accommodation;
+  const otherPriority = other.fairness - other.accommodation;
+  return priority > otherPriority || (priority === otherPriority
+    && (rotation > other.rotation || (rotation === other.rotation
+      && (accommodation > other.accommodation || (accommodation === other.accommodation && desire > other.desire)))));
 }
 
 export function allocateTables(input = {}) {
@@ -158,8 +145,7 @@ export function allocateTables(input = {}) {
       warnings.push(`${member.name}'s current priority was ignored because it is not an available catalogue entry rated Want.`);
       member.priorityKey = null;
     }
-    member.accommodation = accommodationBonus(member);
-    member.waiting = priorityWaitingBonus(member);
+    Object.assign(member, allocationBonuses(member, member.priorityKey));
   }
 
   for (const game of games) {
@@ -250,6 +236,7 @@ export function allocateTables(input = {}) {
   const fixedTables = [];
   const feasiblePriorityKeys = new Set();
   let fixedDesire = 0;
+  let fixedRotation = 0;
   for (const table of proposedFixed) {
     for (const key of table.claims) heldMembers.add(key);
     if (table.resource !== null) heldCopies.add(table.resource);
@@ -261,6 +248,7 @@ export function allocateTables(input = {}) {
     const tableMembers = table.memberKeys.map(key => memberByKey.get(key));
     for (const member of tableMembers) {
       fixedDesire += member.ratings[game.key] === 'want' ? 2 : 1;
+      fixedRotation += rotationPoints(member, game.key);
       if (member.priorityKey === game.key) feasiblePriorityKeys.add(member.key);
     }
     fixedTables.push({
@@ -281,12 +269,16 @@ export function allocateTables(input = {}) {
     const seated = new Set(tables.flatMap(table => table.memberIds.map(idKey)));
     return {
       tables,
+      rotationPolicy: ROTATION_POLICY,
       ...(draw ? {tieBreak: {...draw.details}} : {}),
       unassignedMemberIds: members.filter(member => !seated.has(member.key)).map(member => member.id),
       warnings: [...new Set(warnings)].sort(compareKeys),
       score: {
         seated: fixedSeated + automaticScore.seated,
-        priorityAndFairness: automaticScore.fairness,
+        priorityAndFairness: automaticScore.fairness, // Legacy display total; not a ranking stage.
+        priority: automaticScore.fairness - automaticScore.accommodation,
+        accommodation: automaticScore.accommodation,
+        rotation: fixedRotation + automaticScore.rotation,
         desire: fixedDesire + automaticScore.desire,
       },
       feasiblePriorityMemberIds: members.filter(member => feasiblePriorityKeys.has(member.key)).map(member => member.id),
@@ -294,9 +286,9 @@ export function allocateTables(input = {}) {
   };
   if (automaticMembers.length > MAX_AUTOMATIC_MEMBERS) {
     warnings.push(`Automatic allocation supports at most ${MAX_AUTOMATIC_MEMBERS} people after pre-arranged tables; ${automaticMembers.length} remain. No automatic tables were guessed.`);
-    return finish([], { seated: 0, fairness: 0, desire: 0 });
+    return finish([], { seated: 0, fairness: 0, rotation: 0, accommodation: 0, desire: 0 });
   }
-  if (!automaticMembers.length) return finish([], { seated: 0, fairness: 0, desire: 0 });
+  if (!automaticMembers.length) return finish([], { seated: 0, fairness: 0, rotation: 0, accommodation: 0, desire: 0 });
 
   const count = automaticMembers.length;
   const size = 1 << count;
@@ -309,11 +301,11 @@ export function allocateTables(input = {}) {
     firstIndices[mask] = 31 - Math.clz32(bit);
   }
 
-  // The exact DP still maximises the same three scores. Only traversal of
+  // The exact DP maximises seating, priority, rotation, accommodation, then desire. Only traversal of
   // otherwise tied solutions changes, using the fixed per-meeting draw.
   const orderedGames = draw ? games.slice().sort((a, b) => draw.compare('game', a.key, b.key)) : games;
   let dp = new Array(size);
-  dp[0] = { fairness: 0, desire: 0, previous: null, optionMask: 0, gameOptions: null };
+  dp[0] = { fairness: 0, rotation: 0, accommodation: 0, desire: 0, previous: null, optionMask: 0, gameOptions: null };
   for (const game of orderedGames) {
     const owners = [...game.offers.values()].filter(offer => offer.own
       && !heldCopies.has(copyKey(game.key, offer.userKey))).map(offer => offer.userKey).sort(draw ? (a, b) => draw.compare('copy:' + game.key, a, b) : compareKeys);
@@ -322,6 +314,8 @@ export function allocateTables(input = {}) {
     const eligibleAtCount = new Int32Array(count + 1);
     const memberFairness = new Int16Array(count);
     const memberDesire = new Uint8Array(count);
+    const memberRotation = new Int16Array(count);
+    const memberAccommodation = new Int16Array(count);
     let eligibleMask = 0;
     for (let index = 0; index < count; index += 1) {
       const member = automaticMembers[index];
@@ -329,8 +323,10 @@ export function allocateTables(input = {}) {
       const bit = 1 << index;
       const offer = game.offers.get(member.key);
       memberDesire[index] = member.ratings[game.key] === 'want' ? 2 : 1;
-      memberFairness[index] = member.ratings[game.key] === 'want' ? member.accommodation : 0;
-      if (member.priorityKey === game.key) memberFairness[index] += PRIORITY_VALUE + member.waiting;
+      memberRotation[index] = rotationPoints(member, game.key);
+      memberAccommodation[index] = member.ratings[game.key] === 'want' ? member.accommodation : 0;
+      memberFairness[index] = memberAccommodation[index];
+      if (member.priorityKey === game.key) memberFairness[index] += member.priorityBase + member.waiting;
       for (let players = 1; players <= count; players += 1) {
         if (!allowsCount(member, game.key, players)) continue;
         eligibleAtCount[players] |= bit;
@@ -358,11 +354,15 @@ export function allocateTables(input = {}) {
     const firstTable = new Uint16Array(size);
     const fairnessForMask = new Int16Array(size);
     const desireForMask = new Uint8Array(size);
+    const rotationForMask = new Int16Array(size);
+    const accommodationForMask = new Int16Array(size);
     for (let mask = 1; mask < size; mask += 1) {
       const bit = mask & -mask;
       const index = firstIndices[mask];
       fairnessForMask[mask] = fairnessForMask[mask ^ bit] + memberFairness[index];
       desireForMask[mask] = desireForMask[mask ^ bit] + memberDesire[index];
+      rotationForMask[mask] = rotationForMask[mask ^ bit] + memberRotation[index];
+      accommodationForMask[mask] = accommodationForMask[mask ^ bit] + memberAccommodation[index];
       if ((mask & eligibleMask) !== mask) continue;
       if (teacherForTable[mask]) {
         tableCount[mask] = 1;
@@ -392,8 +392,10 @@ export function allocateTables(input = {}) {
         const combined = covered | subset;
         const fairness = previous.fairness + fairnessForMask[subset];
         const desire = previous.desire + desireForMask[subset];
-        if (!betterScores(fairness, desire, next[combined])) continue;
-        next[combined] = { fairness, desire, previous, optionMask: subset, gameOptions };
+        const rotation = previous.rotation + rotationForMask[subset];
+        const accommodation = previous.accommodation + accommodationForMask[subset];
+        if (!betterScores(fairness, rotation, accommodation, desire, next[combined])) continue;
+        next[combined] = { fairness, rotation, accommodation, desire, previous, optionMask: subset, gameOptions };
       }
     }
     dp = next;
@@ -406,7 +408,7 @@ export function allocateTables(input = {}) {
     if (!candidate) continue;
     if (populations[mask] > populations[bestMask]
       || (populations[mask] === populations[bestMask]
-        && betterScores(candidate.fairness, candidate.desire, best))) {
+        && betterScores(candidate.fairness, candidate.rotation, candidate.accommodation, candidate.desire, best))) {
       bestMask = mask;
       best = candidate;
     }
@@ -433,7 +435,7 @@ export function allocateTables(input = {}) {
   }
   automaticTables.sort((a, b) => compareKeys(idKey(a.gameId), idKey(b.gameId))
     || compareKeys(JSON.stringify(a.memberIds.map(idKey)), JSON.stringify(b.memberIds.map(idKey))));
-  return finish(automaticTables, { seated: populations[bestMask], fairness: best.fairness, desire: best.desire });
+  return finish(automaticTables, { seated: populations[bestMask], fairness: best.fairness, rotation: best.rotation, accommodation: best.accommodation, desire: best.desire });
 }
 
 export default allocateTables;

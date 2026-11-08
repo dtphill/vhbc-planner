@@ -1,8 +1,9 @@
 import {allocateTables} from './allocation.mjs';
+import {allocationBonuses, ROTATION_POLICY} from './rotation-policy.mjs';
 import {fourthSunday} from './calendar.mjs';
 import {PRIVATE_PAGE, readOnlyDatabase, readPrivateInput, describePrivateResult} from './private-planner.mjs';
 
-export const SERIES_VERSION = '1.4.3';
+export const SERIES_VERSION = '1.5.0';
 export const SERIES_API = '/api/admin/planner-series';
 const HEADERS = {'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow'};
 const json = (body,status=200) => Response.json(body,{status,headers:HEADERS});
@@ -18,27 +19,11 @@ export function validateSeriesOptions(value) {
   return {meetings,clearFulfilled};
 }
 
-// Explanation only; allocation decisions still use the unchanged live solver.
-// Regression checks reconcile these contributions with the solver's total score.
+// Use exactly the same history policy as the live allocator, not a duplicated formula.
 export function allocationMemberBonuses(member, games) {
-  const key=value=>((typeof value==='string' && value.length>0)||(typeof value==='number' && Number.isFinite(value)))?String(value):null;
-  const accepted=value=>value==='want'||value==='will';
-  const history=Array.isArray(member.history)?member.history:[];
-  const candidate=key(member.priorityGameId);
-  const priorityKey=candidate!==null && games.some(g=>key(g.id)===candidate) && member.ratings?.[candidate]==='want' ? candidate : null;
-  const recent=history.filter(p=>p&&!p.fixed&&key(p.gameId)!==null&&accepted(p.rating)).slice(-4);
-  const accommodation=Math.min(2,recent.filter(p=>p.rating==='will').length);
-  let opportunities=0,waiting=0;
-  if(priorityKey!==null)for(let i=history.length-1;i>=0;i--){
-    const p=history[i];if(!p||key(p.gameId)===null)continue;
-    if(key(p.gameId)===priorityKey)break;
-    if(p.fixed||!accepted(p.rating))continue;
-    if(key(p.priorityGameId)!==priorityKey)break;
-    opportunities++;if(p.priorityFeasible===true)waiting++;
-    if(opportunities>=4)break;
-  }
-  waiting=Math.min(2,waiting);
-  return {accommodation,waiting,priorityValue:priorityKey===null?0:6+waiting+accommodation};
+  const candidate = member.priorityGameId;
+  const available = candidate != null && games.some(g => String(g.id) === String(candidate));
+  return allocationBonuses(member, available ? candidate : null);
 }
 
 async function readOptions(request) {
@@ -125,10 +110,10 @@ export function withPlannerSeries(base,assets) {
       const js=path.endsWith('.js');return new Response(request.method==='HEAD'?null:js?assets.javascript:assets.css,{headers:{...HEADERS,'Content-Type':js?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'public, max-age=300'}});
     }
     const response=await base.fetch(request,env,ctx);
-    if(path==='/api/health'&&response.ok)return json({...await response.json(),plannerSeries:SERIES_VERSION});
+    if(path==='/api/health'&&response.ok)return json({...await response.json(),plannerSeries:SERIES_VERSION,rotationPolicy:ROTATION_POLICY});
     if(path===PRIVATE_PAGE&&request.method==='GET'&&response.ok&&response.headers.get('content-type')?.includes('text/html')){
       const h=new Headers(response.headers);h.delete('Content-Length');h.delete('ETag');h.set('Cache-Control','private, no-store');
-      const html=(await response.text()).replace('</head>',`<link rel="stylesheet" href="/media/planner-series.css?v=${SERIES_VERSION}"></head>`).replace('</body>',`<script type="module" src="/media/planner-series.js?v=${SERIES_VERSION}"></script></body>`);
+      const html=(await response.text()).replaceAll('/media/private-planner.js?v=1.4.2','/media/private-planner.js?v='+SERIES_VERSION).replace('</head>',`<link rel="stylesheet" href="/media/planner-series.css?v=${SERIES_VERSION}"></head>`).replace('</body>',`<script type="module" src="/media/planner-series.js?v=${SERIES_VERSION}"></script></body>`);
       return new Response(html,{status:response.status,headers:h});
     }
     return response;
