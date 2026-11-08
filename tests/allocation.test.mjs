@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import allocateTables from '../src/allocation.mjs';
+import {allocationBonuses} from '../src/rotation-policy.mjs';
 
 const member = (id, ratings, extra = {}) => ({ id, name: id, ratings, history: [], ...extra });
 const offer = (userId, counts, extra = {}) => ({ userId, own: true, teach: true, counts, ...extra });
@@ -210,10 +211,16 @@ function competingPriorities(history) {
 
 test('only explicitly feasible, non-fixed missed priorities earn waiting credit', () => {
   const missed = fulfilled('alpha', { priorityGameId: 'zulu' });
-  assert.equal(allocateTables(competingPriorities([missed])).tables[0].gameId, 'alpha');
-  assert.equal(allocateTables(competingPriorities([{ ...missed, priorityFeasible: false }])).tables[0].gameId, 'alpha');
-  assert.equal(allocateTables(competingPriorities([{ ...missed, priorityFeasible: true, fixed: true }])).tables[0].gameId, 'alpha');
-  assert.equal(allocateTables(competingPriorities([{ ...missed, priorityFeasible: true }])).tables[0].gameId, 'zulu');
+  for (const h of [missed, {...missed, priorityFeasible:false}, {...missed, priorityFeasible:true, fixed:true}]) {
+    const input=competingPriorities([h]);
+    assert.equal(allocationBonuses(input.members[0]).waiting,0);
+    assert.equal(allocateTables(input).score.priority,6);
+    // Rotation can now select the unplayed game even without a waiting bonus.
+    assert.equal(allocateTables(input).tables[0].gameId,'zulu');
+  }
+  const input=competingPriorities([{...missed,priorityFeasible:true}]);
+  assert.equal(allocationBonuses(input.members[0]).waiting,1);
+  assert.equal(allocateTables(input).score.priority,7);
 });
 
 test('fulfilling a still-selected priority resets waiting credit, including a fixed-table fulfilment', () => {
@@ -230,7 +237,7 @@ test('historical bonuses are bounded and voluntary fixed-table compromises earn 
   const many = allocateTables(competingPriorities(Array.from({ length: 100 }, () => ({ ...missed }))));
   assert.deepEqual(two.score, many.score);
   const fixed = allocateTables(competingPriorities([{ ...missed, fixed: true }, { ...missed, fixed: true }]));
-  assert.equal(fixed.tables[0].gameId, 'alpha');
+  assert.equal(fixed.tables[0].gameId, 'zulu'); // Reserved plays count for rotation, not fairness.
   assert.equal(fixed.score.priorityAndFairness, 6);
 });
 
@@ -262,8 +269,8 @@ test('twelve people and many interchangeable offers complete without duplicating
 
 test('empty input is safe and a larger automatic pool returns a clear limit instead of guessing', () => {
   assert.deepEqual(allocateTables(), {
-    tables: [], unassignedMemberIds: [], warnings: [],
-    score: { seated: 0, priorityAndFairness: 0, desire: 0 }, feasiblePriorityMemberIds: [],
+    tables: [], rotationPolicy:'personal-history-rotation-v1', unassignedMemberIds: [], warnings: [],
+    score: { seated: 0, priorityAndFairness: 0, priority:0, accommodation:0, rotation:0, desire: 0 }, feasiblePriorityMemberIds: [],
   });
   const result = allocateTables({ members: Array.from({ length: 13 }, (_, index) => member(`p${index}`, {})), games: [] });
   assert.equal(result.unassignedMemberIds.length, 13);
